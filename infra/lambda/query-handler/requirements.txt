@@ -1,0 +1,16 @@
+# FastAPI + server
+fastapi
+uvicorn
+
+# GraphRAG Toolkit
+graphrag-toolkit-lexical-graph @ https://github.com/awslabs/graphrag-toolkit/archive/refs/tags/v3.14.0.zip#subdirectory=lexical-graph
+
+# GraphRAG dependencies
+anthropic-bedrock
+llama-index-core
+llama-index-embeddings-bedrock
+llama-index-llms-anthropic
+llama-index-llms-bedrock-converse
+python-dotenv
+smart_open
+spacy

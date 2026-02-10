@@ -90,9 +90,8 @@ def index_document(text: str, filename: str, tenant_id: str) -> dict:
             GraphStoreFactory.for_graph_store(GRAPH_STORE_CONFIG) as graph_store,
             VectorStoreFactory.for_vector_store(VECTOR_STORE_CONFIG, index_names=['chunk']) as vector_store
         ):
-            config = IndexingConfig(
-                chunking=[SentenceSplitter(chunk_size=512, chunk_overlap=50)]
-            )
+            splitter = SentenceSplitter(chunk_size=512, chunk_overlap=50)
+            config = IndexingConfig(chunking=[splitter])
             
             graph_index = LexicalGraphIndex(
                 graph_store,
@@ -107,9 +106,13 @@ def index_document(text: str, filename: str, tenant_id: str) -> dict:
             )
             docs = reader.load_data()
             
+            # Get actual chunk count by running the splitter
+            chunks = splitter.get_nodes_from_documents(docs)
+            chunk_count = len(chunks)
+            
             graph_index.extract_and_build(nodes=docs, show_progress=False)
             
-            return {"chunks_created": len(docs), "tenant_hash": tenant_hash}
+            return {"chunks_created": chunk_count, "tenant_hash": tenant_hash}
     finally:
         os.unlink(tmp_path)
 
@@ -123,7 +126,7 @@ def save_document_metadata(user_id: str, s3_path: str, filename: str, size: int,
     table.put_item(Item={
         'userId': user_id,
         's3Path': s3_path,
-        'filename': filename,
+        'fileName': filename,  # Use camelCase to match UI expectations
         'size': size,
         'md5': md5,
         'uploadedAt': datetime.utcnow().isoformat(),
@@ -326,20 +329,34 @@ async def reset_graph(tenant_id: str = Query(default="default")):
     try:
         tenant_hash = get_tenant_hash(tenant_id)
         
-        with GraphStoreFactory.for_graph_store(GRAPH_STORE_CONFIG) as graph_store:
-            # Delete all nodes and relationships for this tenant
-            # Using openCypher to delete tenant-specific data
-            delete_query = """
-            MATCH (n)
-            WHERE n.`~tenantId` = $tenantId OR n.tenantId = $tenantId
-            DETACH DELETE n
-            """
-            try:
-                graph_store.execute_query(delete_query, {'tenantId': tenant_hash})
-            except Exception as e:
-                print(f"Tenant-specific delete failed, trying full reset: {e}")
-                # Fallback: delete all nodes (use with caution)
-                graph_store.execute_query("MATCH (n) DETACH DELETE n", {})
+        # Use Neptune Analytics API directly for more reliable deletion
+        try:
+            # First try to delete all data using Neptune Analytics ExecuteQuery API
+            delete_query = "MATCH (n) DETACH DELETE n"
+            
+            response = neptune_client.execute_query(
+                graphIdentifier=NEPTUNE_GRAPH_ID,
+                queryString=delete_query,
+                language='OPEN_CYPHER'
+            )
+            print(f"Reset graph response: {response}")
+            
+        except Exception as e:
+            print(f"Neptune API delete failed: {e}")
+            # Fallback to graphrag_toolkit method
+            with GraphStoreFactory.for_graph_store(GRAPH_STORE_CONFIG) as graph_store:
+                try:
+                    # Try tenant-specific delete first
+                    delete_query = """
+                    MATCH (n)
+                    WHERE n.`~tenantId` = $tenantId OR n.tenantId = $tenantId
+                    DETACH DELETE n
+                    """
+                    graph_store.execute_query(delete_query, {'tenantId': tenant_hash})
+                except Exception as inner_e:
+                    print(f"Tenant-specific delete failed: {inner_e}")
+                    # Full reset
+                    graph_store.execute_query("MATCH (n) DETACH DELETE n", {})
         
         return {
             "message": "Graph reset successfully",

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   AppLayout,
   ContentLayout,
@@ -19,7 +19,7 @@ import {
 } from '@cloudscape-design/components'
 import { fetchAuthSession } from '@aws-amplify/auth'
 import MessageFormatter from '../components/MessageFormatter'
-import GraphVisualization from '../components/GraphVisualization'
+import GraphVisualization, { GraphVisualizationRef } from '../components/GraphVisualization'
 import { loadConfig } from '../config'
 import { signedFetch } from '../App'
 
@@ -51,10 +51,10 @@ interface UploadedFile {
 
 interface StoredDocument {
   s3Path: string
-  fileName: string
+  fileName?: string
+  filename?: string  // fallback for old records
   uploadedAt: string
   fileSize?: number
-  chunksCreated?: number
 }
 
 export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
@@ -75,6 +75,7 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
   const [showResetModal, setShowResetModal] = useState(false)
   const [tenantId] = useState('demo')
   const [userId, setUserId] = useState<string>('anonymous')
+  const graphVisualizationRef = useRef<GraphVisualizationRef>(null)
 
   useEffect(() => {
     loadConfig().then((cfg) => {
@@ -153,6 +154,8 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
       setVectorMessages([])
       setFiles([])
       await fetchStoredDocuments()
+      // Refresh the graph visualization
+      graphVisualizationRef.current?.refresh()
     } catch (err) {
       setError(`Failed to reset graph: ${err instanceof Error ? err.message : 'Unknown error'}`)
     } finally {
@@ -420,6 +423,7 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
                 <Container>
                   {apiUrl && (
                     <GraphVisualization 
+                      ref={graphVisualizationRef}
                       apiUrl={apiUrl} 
                       tenantId={tenantId}
                       onFetch={signedFetchWrapper}
@@ -461,7 +465,6 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
                       { id: 'name', header: 'File', cell: item => item.name },
                       { id: 'size', header: 'Size', cell: item => item.size },
                       { id: 'status', header: 'Status', cell: item => getStatusIndicator(item.status) },
-                      { id: 'chunks', header: 'Chunks', cell: item => item.chunksCreated || '-' },
                     ]}
                     variant="embedded"
                   />
@@ -489,9 +492,8 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
                   <Table
                     items={storedDocuments}
                     columnDefinitions={[
-                      { id: 'fileName', header: 'File Name', cell: item => item.fileName },
+                      { id: 'fileName', header: 'File Name', cell: item => item.fileName || item.filename || 'Unknown' },
                       { id: 'uploadedAt', header: 'Uploaded', cell: item => new Date(item.uploadedAt).toLocaleString() },
-                      { id: 'chunks', header: 'Chunks', cell: item => item.chunksCreated || '-' },
                       { 
                         id: 'actions', 
                         header: 'Actions', 

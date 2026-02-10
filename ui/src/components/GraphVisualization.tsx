@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react'
 import * as d3 from 'd3'
 import { Box, Button, Spinner } from '@cloudscape-design/components'
 
@@ -30,7 +30,12 @@ interface GraphVisualizationProps {
   onFetch?: (url: string, options?: RequestInit) => Promise<Response>
 }
 
-export default function GraphVisualization({ apiUrl, tenantId = 'demo', onFetch }: GraphVisualizationProps) {
+export interface GraphVisualizationRef {
+  refresh: () => void
+}
+
+const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisualizationProps>(
+  ({ apiUrl, tenantId = 'demo', onFetch }, ref) => {
   const svgRef = useRef<SVGSVGElement>(null)
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<GraphData>({ nodes: [], links: [] })
@@ -58,6 +63,11 @@ export default function GraphVisualization({ apiUrl, tenantId = 'demo', onFetch 
       setLoading(false)
     }
   }
+
+  // Expose refresh method to parent
+  useImperativeHandle(ref, () => ({
+    refresh: fetchGraphData
+  }))
 
   useEffect(() => {
     if (apiUrl) {
@@ -210,4 +220,6 @@ export default function GraphVisualization({ apiUrl, tenantId = 'demo', onFetch 
       </Box>
     </div>
   )
-}
+})
+
+export default GraphVisualization

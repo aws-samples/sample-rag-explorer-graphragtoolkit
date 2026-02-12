@@ -6,11 +6,9 @@ from concurrent.futures import ThreadPoolExecutor
 original_ProcessPoolExecutor = concurrent.futures.ProcessPoolExecutor
 concurrent.futures.ProcessPoolExecutor = ThreadPoolExecutor
 
-# Also patch in the process module
 import concurrent.futures.process
 concurrent.futures.process.ProcessPoolExecutor = ThreadPoolExecutor
 
-# Disable multiprocessing/threading for Lambda compatibility
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 os.environ['OMP_NUM_THREADS'] = '1'
 os.environ['MKL_NUM_THREADS'] = '1'
@@ -26,13 +24,12 @@ from decimal import Decimal
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Query
 from pydantic import BaseModel
-
-from PyPDF2 import PdfReader
+from boto3.dynamodb.conditions import Key
 
 from graphrag_toolkit.lexical_graph import LexicalGraphIndex, IndexingConfig
 from graphrag_toolkit.lexical_graph.storage import GraphStoreFactory, VectorStoreFactory
 from llama_index.core import SimpleDirectoryReader
-from llama_index.core.node_parser import SentenceSplitter
+from llama_index.core.node_parser import SentenceSplitter, MarkdownNodeParser
 
 # Environment variables
 S3_BUCKET = os.environ.get('S3_BUCKET')
@@ -45,128 +42,128 @@ s3_client = boto3.client('s3')
 dynamodb = boto3.resource('dynamodb')
 neptune_client = boto3.client('neptune-graph')
 
-# FastAPI app
 app = FastAPI(title="GraphRAG Document Processor")
 
 
-class DocumentInfo(BaseModel):
-    userId: str
-    s3Path: str
-    filename: str
-    size: int
-    md5: str
-    uploadedAt: str
-    chunksCreated: int
-
+# ==================== HELPERS ====================
 
 def get_tenant_hash(tenant_id: str) -> str:
-    """Generate consistent tenant hash"""
     return hashlib.md5(tenant_id.encode()).hexdigest()[:10].lower()
 
 
-def extract_pdf_text(content: bytes) -> str:
-    """Extract text from PDF"""
-    with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
-        tmp.write(content)
-        tmp_path = tmp.name
-    try:
-        reader = PdfReader(tmp_path)
-        return "".join(page.extract_text() + "\n" for page in reader.pages)
-    finally:
-        os.unlink(tmp_path)
+def calculate_md5(file_content: bytes, user_id: str) -> str:
+    """Calculate MD5 hash of file content + user_id for dedup."""
+    h = hashlib.md5()
+    h.update(user_id.encode('utf-8'))
+    h.update(file_content)
+    return h.hexdigest()
 
 
-def index_document(text: str, filename: str, tenant_id: str) -> dict:
-    """Index document text into Neptune graph"""
+def is_file_processed(md5_hash: str) -> bool:
+    """Check if a file with this MD5 has already been processed."""
+    if not DOCUMENT_TABLE:
+        return False
+    table = dynamodb.Table(DOCUMENT_TABLE)
+    response = table.query(
+        IndexName='md5-index',
+        KeyConditionExpression=Key('md5').eq(md5_hash)
+    )
+    return len(response.get('Items', [])) > 0
+
+
+def save_document_metadata(user_id: str, tenant_id: str, s3_path: str, filename: str,
+                           size: int, md5: str, chunks: int, status: str = 'completed'):
+    """Save document metadata to DynamoDB."""
+    if not DOCUMENT_TABLE:
+        return
+    table = dynamodb.Table(DOCUMENT_TABLE)
+    table.put_item(Item={
+        'userId': user_id,
+        's3Path': s3_path,
+        'tenantId': tenant_id,
+        'fileName': filename,
+        'size': size,
+        'md5': md5,
+        'uploadedAt': datetime.utcnow().isoformat(),
+        'chunksCreated': chunks,
+        'status': status,
+    })
+
+
+def delete_document_metadata(user_id: str, s3_path: str):
+    if not DOCUMENT_TABLE:
+        return
+    table = dynamodb.Table(DOCUMENT_TABLE)
+    table.delete_item(Key={'userId': user_id, 's3Path': s3_path})
+
+
+def get_user_documents(user_id: str) -> List[dict]:
+    if not DOCUMENT_TABLE:
+        return []
+    table = dynamodb.Table(DOCUMENT_TABLE)
+    response = table.query(
+        KeyConditionExpression=Key('userId').eq(user_id)
+    )
+    items = []
+    for item in response.get('Items', []):
+        converted = {}
+        for k, v in item.items():
+            converted[k] = int(v) if isinstance(v, Decimal) else v
+        items.append(converted)
+    return items
+
+
+# ==================== INDEXING ====================
+
+def index_single_document(file_content: bytes, filename: str, tenant_id: str) -> dict:
+    """Index a single document into the graph. The toolkit's extract_and_build
+    is additive — it adds to the existing graph for the tenant."""
     tenant_hash = get_tenant_hash(tenant_id)
-    
-    # Save to temp file for processing
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as tmp:
-        tmp.write(text)
+
+    # Determine file extension and choose chunking strategy
+    is_md = filename.lower().endswith('.md')
+    suffix = '.md' if is_md else '.txt'
+
+    with tempfile.NamedTemporaryFile(mode='wb', suffix=suffix, delete=False) as tmp:
+        tmp.write(file_content)
         tmp_path = tmp.name
-    
+
     try:
+        if is_md:
+            chunking = [MarkdownNodeParser(), SentenceSplitter(chunk_size=512, chunk_overlap=50)]
+        else:
+            chunking = [SentenceSplitter(chunk_size=512, chunk_overlap=50)]
+
         with (
             GraphStoreFactory.for_graph_store(GRAPH_STORE_CONFIG) as graph_store,
             VectorStoreFactory.for_vector_store(VECTOR_STORE_CONFIG, index_names=['chunk']) as vector_store
         ):
-            splitter = SentenceSplitter(chunk_size=512, chunk_overlap=50)
-            config = IndexingConfig(chunking=[splitter])
-            
+            config = IndexingConfig(chunking=chunking)
             graph_index = LexicalGraphIndex(
                 graph_store,
                 vector_store,
                 tenant_id=tenant_hash,
                 indexing_config=config
             )
-            
+
             reader = SimpleDirectoryReader(
                 input_files=[tmp_path],
                 file_metadata=lambda p: {'file_name': filename}
             )
             docs = reader.load_data()
-            
-            # Get actual chunk count by running the splitter
-            chunks = splitter.get_nodes_from_documents(docs)
-            chunk_count = len(chunks)
-            
+
+            # Count chunks for metadata
+            splitter = SentenceSplitter(chunk_size=512, chunk_overlap=50)
+            chunk_count = len(splitter.get_nodes_from_documents(docs))
+
             graph_index.extract_and_build(nodes=docs, show_progress=False)
-            
+
             return {"chunks_created": chunk_count, "tenant_hash": tenant_hash}
     finally:
         os.unlink(tmp_path)
 
 
-def save_document_metadata(user_id: str, s3_path: str, filename: str, size: int, md5: str, chunks: int):
-    """Save document metadata to DynamoDB"""
-    if not DOCUMENT_TABLE:
-        return
-    
-    table = dynamodb.Table(DOCUMENT_TABLE)
-    table.put_item(Item={
-        'userId': user_id,
-        's3Path': s3_path,
-        'fileName': filename,  # Use camelCase to match UI expectations
-        'size': size,
-        'md5': md5,
-        'uploadedAt': datetime.utcnow().isoformat(),
-        'chunksCreated': chunks,
-    })
-
-
-def get_user_documents(user_id: str) -> List[dict]:
-    """Get all documents for a user from DynamoDB"""
-    if not DOCUMENT_TABLE:
-        return []
-    
-    table = dynamodb.Table(DOCUMENT_TABLE)
-    response = table.query(
-        KeyConditionExpression='userId = :uid',
-        ExpressionAttributeValues={':uid': user_id}
-    )
-    
-    # Convert Decimal to int for JSON serialization
-    items = []
-    for item in response.get('Items', []):
-        converted = {}
-        for k, v in item.items():
-            if isinstance(v, Decimal):
-                converted[k] = int(v)
-            else:
-                converted[k] = v
-        items.append(converted)
-    
-    return items
-
-
-def delete_document_metadata(user_id: str, s3_path: str):
-    """Delete document metadata from DynamoDB"""
-    if not DOCUMENT_TABLE:
-        return
-    
-    table = dynamodb.Table(DOCUMENT_TABLE)
-    table.delete_item(Key={'userId': user_id, 's3Path': s3_path})
-
+# ==================== API ROUTES ====================
 
 @app.get("/")
 async def root():
@@ -191,53 +188,67 @@ async def process_and_index_file(
     tenant_id: str,
     user_id: str
 ) -> dict:
-    """Common logic to process and index a file"""
-    # Validate file type
-    if not filename.lower().endswith(('.txt', '.pdf')):
-        raise HTTPException(status_code=400, detail="Only TXT and PDF files are supported")
-    
+    """Upload file to S3, check for duplicates, index only if new."""
+    if not filename.lower().endswith(('.txt', '.md')):
+        raise HTTPException(status_code=400, detail="Only TXT and MD files are supported")
+
     file_size = len(file_content)
-    file_md5 = hashlib.md5(file_content).hexdigest()
-    
-    # Extract text based on file type
-    if filename.lower().endswith('.pdf'):
-        text = extract_pdf_text(file_content)
-    else:
-        text = file_content.decode('utf-8')
-    
-    # Upload to S3 with user-isolated path
+    file_md5 = calculate_md5(file_content, user_id)
+
+    # Check if this exact file has already been processed
+    if is_file_processed(file_md5):
+        return {
+            "message": "Document already processed, skipping indexing",
+            "filename": filename,
+            "tenant_id": tenant_id,
+            "already_processed": True,
+            "chunks_created": 0,
+        }
+
+    # Upload to S3
     s3_key = None
     if S3_BUCKET:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        s3_key = f"private/{user_id}/documents/{timestamp}_{filename}"
+        s3_key = f"private/{user_id}/{tenant_id}/documents/{timestamp}_{filename}"
         s3_client.put_object(
             Bucket=S3_BUCKET,
             Key=s3_key,
             Body=file_content,
             ContentType=content_type
         )
-    
-    # Index the document
-    index_result = index_document(text, filename, tenant_id)
-    
-    # Save metadata to DynamoDB
+
+    # Index just this file (extract_and_build is additive to the tenant's graph)
+    try:
+        index_result = index_single_document(file_content, filename, tenant_id)
+    except Exception as e:
+        # Clean up: remove S3 object if indexing fails so user can retry
+        if S3_BUCKET and s3_key:
+            try:
+                s3_client.delete_object(Bucket=S3_BUCKET, Key=s3_key)
+            except Exception:
+                pass
+        raise e
+
+    # Save metadata to DynamoDB (only after successful indexing)
     if s3_key:
         save_document_metadata(
             user_id=user_id,
+            tenant_id=tenant_id,
             s3_path=s3_key,
             filename=filename,
             size=file_size,
             md5=file_md5,
             chunks=index_result["chunks_created"]
         )
-    
+
     return {
         "message": "Document uploaded and indexed successfully",
         "filename": filename,
         "s3_key": s3_key,
         "tenant_id": tenant_id,
         "user_id": user_id,
-        "chunks_created": index_result["chunks_created"]
+        "chunks_created": index_result["chunks_created"],
+        "already_processed": False,
     }
 
 
@@ -247,14 +258,12 @@ async def upload_document(
     user_id: str = Query(default="anonymous"),
     file: UploadFile = File(...),
 ):
-    """Upload document (TXT/PDF) via multipart form data"""
+    """Upload document (TXT/MD) via multipart form data"""
     try:
         filename = file.filename
         file_content = await file.read()
         content_type = file.content_type or 'application/octet-stream'
-        
         return await process_and_index_file(filename, file_content, content_type, tenant_id, user_id)
-        
     except HTTPException:
         raise
     except Exception as e:
@@ -272,14 +281,11 @@ async def upload_document_json(
 ):
     """Upload document via JSON with base64 encoded content (for signed requests)"""
     import base64
-    
     try:
         filename = data.fileName
         file_content = base64.b64decode(data.fileContent)
         content_type = data.contentType or 'application/octet-stream'
-        
         return await process_and_index_file(filename, file_content, content_type, tenant_id, user_id)
-        
     except HTTPException:
         raise
     except Exception as e:
@@ -307,16 +313,12 @@ async def delete_document(
 ):
     """Delete a document from S3 and DynamoDB"""
     try:
-        # Delete from S3
         if S3_BUCKET and s3_path:
             try:
                 s3_client.delete_object(Bucket=S3_BUCKET, Key=s3_path)
             except Exception as e:
                 print(f"S3 delete error: {e}")
-        
-        # Delete from DynamoDB
         delete_document_metadata(user_id, s3_path)
-        
         return {"message": "Document deleted successfully", "s3_path": s3_path}
     except Exception as e:
         print(f"Delete document error: {e}")
@@ -328,36 +330,24 @@ async def reset_graph(tenant_id: str = Query(default="default")):
     """Reset/clear the Neptune graph for a tenant"""
     try:
         tenant_hash = get_tenant_hash(tenant_id)
-        
-        # Use Neptune Analytics API directly for more reliable deletion
         try:
-            # First try to delete all data using Neptune Analytics ExecuteQuery API
-            delete_query = "MATCH (n) DETACH DELETE n"
-            
             response = neptune_client.execute_query(
                 graphIdentifier=NEPTUNE_GRAPH_ID,
-                queryString=delete_query,
+                queryString="MATCH (n) DETACH DELETE n",
                 language='OPEN_CYPHER'
             )
             print(f"Reset graph response: {response}")
-            
         except Exception as e:
             print(f"Neptune API delete failed: {e}")
-            # Fallback to graphrag_toolkit method
             with GraphStoreFactory.for_graph_store(GRAPH_STORE_CONFIG) as graph_store:
                 try:
-                    # Try tenant-specific delete first
-                    delete_query = """
-                    MATCH (n)
-                    WHERE n.`~tenantId` = $tenantId OR n.tenantId = $tenantId
-                    DETACH DELETE n
-                    """
-                    graph_store.execute_query(delete_query, {'tenantId': tenant_hash})
+                    graph_store.execute_query(
+                        "MATCH (n) WHERE n.`~tenantId` = $tenantId OR n.tenantId = $tenantId DETACH DELETE n",
+                        {'tenantId': tenant_hash}
+                    )
                 except Exception as inner_e:
                     print(f"Tenant-specific delete failed: {inner_e}")
-                    # Full reset
                     graph_store.execute_query("MATCH (n) DETACH DELETE n", {})
-        
         return {
             "message": "Graph reset successfully",
             "tenant_id": tenant_id,

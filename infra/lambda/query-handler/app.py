@@ -158,102 +158,255 @@ async def query_documents(request: QueryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/vector-chunks")
+async def get_vector_chunks(
+    tenant_id: str = Query(default="default"),
+    limit: int = Query(default=20)
+):
+    """Get vector chunks for exploration - shows what vector-only RAG sees"""
+    try:
+        tenant_hash = get_tenant_hash(tenant_id)
+        
+        with GraphStoreFactory.for_graph_store(GRAPH_STORE_CONFIG) as graph_store:
+            
+            chunks_query = """
+            MATCH (c:Chunk)
+            OPTIONAL MATCH (s:Source)-[:HAS_CHUNK]->(c)
+            RETURN id(c) AS chunkId, 
+                   c.value AS text, 
+                   s.fileName AS source
+            LIMIT $limit
+            """
+            
+            results = graph_store.execute_query(chunks_query, {'limit': limit})
+            
+            chunks = []
+            for row in results:
+                chunk_id = str(row.get('chunkId', ''))
+                text = row.get('text', '')
+                source = row.get('source', 'Unknown')
+                
+                if text:
+                    display_text = text[:500] + '...' if len(text) > 500 else text
+                    chunks.append({
+                        'id': chunk_id,
+                        'text': display_text,
+                        'fullText': text,
+                        'source': source,
+                        'charCount': len(text)
+                    })
+            
+            return {
+                'chunks': chunks,
+                'total': len(chunks),
+                'description': 'These are the text chunks stored in the vector index. Vector-only RAG uses similarity search to find relevant chunks based on your question embedding.'
+            }
+            
+    except Exception as e:
+        print(f"Vector chunks error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'chunks': [], 'total': 0, 'error': str(e)}
+
+
+@app.get("/graph-nodes")
+async def get_graph_nodes(
+    tenant_id: str = Query(default="default"),
+    node_type: str = Query(default="all"),
+    limit: int = Query(default=50)
+):
+    """Get graph nodes for exploration - shows entities, topics, and facts in the knowledge graph"""
+    try:
+        tenant_hash = get_tenant_hash(tenant_id)
+        
+        with GraphStoreFactory.for_graph_store(GRAPH_STORE_CONFIG) as graph_store:
+            nodes_by_type = {}
+            
+            # Query entities
+            if node_type in ['all', 'entity']:
+                try:
+                    entity_results = graph_store.execute_query(
+                        "MATCH (e) WHERE (e:Entity OR any(l IN labels(e) WHERE l CONTAINS 'Entity')) RETURN id(e) AS id, labels(e) AS labels, properties(e) AS props LIMIT $limit",
+                        {'limit': limit}
+                    )
+                    entities = []
+                    for row in entity_results:
+                        props = row.get('props', {})
+                        name = props.get('value') or props.get('name') or str(row.get('id', ''))[:30]
+                        entity_type = props.get('classification') or 'Entity'
+                        entities.append({
+                            'id': str(row.get('id', '')),
+                            'name': name,
+                            'type': entity_type,
+                            'labels': row.get('labels', [])
+                        })
+                    nodes_by_type['entities'] = entities
+                except Exception as e:
+                    print(f"Entity query failed: {e}")
+                    nodes_by_type['entities'] = []
+            
+            # Query topics
+            if node_type in ['all', 'topic']:
+                try:
+                    topic_results = graph_store.execute_query(
+                        "MATCH (t:Topic) RETURN id(t) AS id, t.value AS value LIMIT $limit",
+                        {'limit': limit}
+                    )
+                    topics = []
+                    for row in topic_results:
+                        value = row.get('value', '')
+                        if value:
+                            topics.append({
+                                'id': str(row.get('id', '')),
+                                'value': value[:200] + '...' if len(value) > 200 else value
+                            })
+                    nodes_by_type['topics'] = topics
+                except Exception as e:
+                    print(f"Topic query failed: {e}")
+                    nodes_by_type['topics'] = []
+            
+            # Query statements
+            if node_type in ['all', 'statement']:
+                try:
+                    statement_results = graph_store.execute_query(
+                        "MATCH (s:Statement) RETURN id(s) AS id, s.value AS value LIMIT $limit",
+                        {'limit': limit}
+                    )
+                    statements = []
+                    for row in statement_results:
+                        value = row.get('value', '')
+                        if value:
+                            statements.append({
+                                'id': str(row.get('id', '')),
+                                'value': value[:300] + '...' if len(value) > 300 else value
+                            })
+                    nodes_by_type['statements'] = statements
+                except Exception as e:
+                    print(f"Statement query failed: {e}")
+                    nodes_by_type['statements'] = []
+            
+            # Query facts
+            if node_type in ['all', 'fact']:
+                try:
+                    fact_results = graph_store.execute_query(
+                        "MATCH (f:Fact) RETURN id(f) AS id, f.value AS value LIMIT $limit",
+                        {'limit': limit}
+                    )
+                    facts = []
+                    for row in fact_results:
+                        value = row.get('value', '')
+                        if value:
+                            facts.append({
+                                'id': str(row.get('id', '')),
+                                'value': value[:300] + '...' if len(value) > 300 else value
+                            })
+                    nodes_by_type['facts'] = facts
+                except Exception as e:
+                    print(f"Fact query failed: {e}")
+                    nodes_by_type['facts'] = []
+            
+            # Get relationship counts
+            try:
+                rel_results = graph_store.execute_query(
+                    "MATCH ()-[r]->() RETURN type(r) AS relType, count(*) AS count ORDER BY count DESC LIMIT 10",
+                    {}
+                )
+                relationships = [{'type': r['relType'], 'count': r['count']} for r in rel_results]
+            except:
+                relationships = []
+            
+            return {
+                'nodes': nodes_by_type,
+                'relationships': relationships,
+                'description': 'The knowledge graph contains entities, topics, statements, and facts extracted from your documents. GraphRAG traverses these connections to find structurally relevant information.'
+            }
+            
+    except Exception as e:
+        print(f"Graph nodes error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'nodes': {}, 'relationships': [], 'error': str(e)}
+
+
 @app.get("/graph-visualization")
 async def get_graph_visualization(
     tenant_id: str = Query(default="default"),
     limit: int = Query(default=100)
 ):
-    """Get graph data for visualization"""
+    """Get graph data for visualization — fetches a connected subgraph"""
     try:
-        tenant_hash = get_tenant_hash(tenant_id)
-        
         with GraphStoreFactory.for_graph_store(GRAPH_STORE_CONFIG) as graph_store:
-            # Query nodes with their labels and properties
-            nodes_query = """
-            MATCH (n)
-            WHERE n.`~tenantId` = $tenantId OR n.tenantId = $tenantId OR true
-            RETURN id(n) AS id, labels(n) AS labels, properties(n) AS props
-            LIMIT $limit
-            """
-            
-            # Query relationships
-            rels_query = """
+            # Single query: fetch relationships and their connected nodes together
+            # This guarantees we get a connected subgraph, not random disconnected nodes
+            subgraph_query = """
             MATCH (a)-[r]->(b)
-            WHERE (a.`~tenantId` = $tenantId OR a.tenantId = $tenantId OR true)
-            RETURN id(a) AS source, id(b) AS target, type(r) AS type
+            RETURN id(a) AS source, labels(a) AS sourceLabels, properties(a) AS sourceProps,
+                   id(b) AS target, labels(b) AS targetLabels, properties(b) AS targetProps,
+                   type(r) AS relType
             LIMIT $limit
             """
+            results = graph_store.execute_query(subgraph_query, {'limit': limit * 3})
             
-            try:
-                nodes_result = graph_store.execute_query(nodes_query, {'tenantId': tenant_hash, 'limit': limit})
-                rels_result = graph_store.execute_query(rels_query, {'tenantId': tenant_hash, 'limit': limit})
-            except Exception as e:
-                print(f"Query with tenant filter failed, trying without: {e}")
-                # Fallback without tenant filter
-                nodes_result = graph_store.execute_query(
-                    "MATCH (n) RETURN id(n) AS id, labels(n) AS labels, properties(n) AS props LIMIT $limit",
-                    {'limit': limit}
-                )
-                rels_result = graph_store.execute_query(
-                    "MATCH (a)-[r]->(b) RETURN id(a) AS source, id(b) AS target, type(r) AS type LIMIT $limit",
-                    {'limit': limit}
-                )
-            
-            # Process nodes
-            nodes = []
-            node_ids = set()
-            for row in nodes_result:
-                node_id = str(row.get('id', ''))
-                if node_id and node_id not in node_ids:
-                    node_ids.add(node_id)
-                    labels = row.get('labels', [])
-                    props = row.get('props', {})
-                    
-                    # Determine node type from labels
-                    node_type = 'concept'
-                    if labels:
-                        label = labels[0].lower() if isinstance(labels, list) else str(labels).lower()
-                        if 'document' in label or 'source' in label:
-                            node_type = 'document'
-                        elif 'person' in label:
-                            node_type = 'person'
-                        elif 'org' in label or 'company' in label:
-                            node_type = 'organization'
-                        elif 'location' in label or 'place' in label:
-                            node_type = 'location'
-                        elif 'chunk' in label:
-                            node_type = 'chunk'
-                        elif 'entity' in label:
-                            node_type = 'entity'
-                    
-                    # Get display name
-                    name = props.get('name') or props.get('value') or props.get('title') or node_id[:20]
-                    if isinstance(name, str) and len(name) > 50:
-                        name = name[:50] + '...'
-                    
-                    nodes.append({
-                        'id': node_id,
-                        'name': str(name),
-                        'type': node_type,
-                        'description': str(props.get('description', ''))[:100] if props.get('description') else ''
-                    })
-            
-            # Process relationships
+            nodes = {}
             links = []
-            for row in rels_result:
-                source = str(row.get('source', ''))
-                target = str(row.get('target', ''))
-                rel_type = row.get('type', 'RELATED_TO')
+            
+            def process_node(node_id, labels, props):
+                if node_id in nodes:
+                    return
+                node_type = 'concept'
+                if labels:
+                    label = labels[0].lower() if isinstance(labels, list) else str(labels).lower()
+                    if 'document' in label or 'source' in label:
+                        node_type = 'document'
+                    elif 'person' in label:
+                        node_type = 'person'
+                    elif 'org' in label or 'company' in label:
+                        node_type = 'organization'
+                    elif 'location' in label or 'place' in label:
+                        node_type = 'location'
+                    elif 'chunk' in label:
+                        node_type = 'chunk'
+                    elif 'entity' in label:
+                        node_type = 'entity'
+                    elif 'topic' in label:
+                        node_type = 'concept'
+                    elif 'statement' in label:
+                        node_type = 'concept'
+                    elif 'fact' in label:
+                        node_type = 'entity'
                 
-                if source in node_ids and target in node_ids:
-                    links.append({
-                        'source': source,
-                        'target': target,
-                        'type': str(rel_type)
-                    })
+                name = props.get('name') or props.get('value') or props.get('title') or str(node_id)[:20]
+                if isinstance(name, str) and len(name) > 50:
+                    name = name[:50] + '...'
+                
+                nodes[node_id] = {
+                    'id': node_id,
+                    'name': str(name),
+                    'type': node_type,
+                    'description': str(props.get('description', ''))[:100] if props.get('description') else ''
+                }
+            
+            for row in results:
+                src_id = str(row.get('source', ''))
+                tgt_id = str(row.get('target', ''))
+                if not src_id or not tgt_id:
+                    continue
+                
+                process_node(src_id, row.get('sourceLabels', []), row.get('sourceProps', {}))
+                process_node(tgt_id, row.get('targetLabels', []), row.get('targetProps', {}))
+                
+                links.append({
+                    'source': src_id,
+                    'target': tgt_id,
+                    'type': str(row.get('relType', 'RELATED_TO'))
+                })
+                
+                # Cap nodes for visualization performance
+                if len(nodes) >= limit:
+                    break
             
             return {
-                'nodes': nodes,
+                'nodes': list(nodes.values()),
                 'links': links
             }
             
@@ -261,8 +414,9 @@ async def get_graph_visualization(
         print(f"Graph visualization error: {e}")
         import traceback
         traceback.print_exc()
-        # Return empty graph on error
         return {'nodes': [], 'links': []}
+
+
 
 
 if __name__ == "__main__":

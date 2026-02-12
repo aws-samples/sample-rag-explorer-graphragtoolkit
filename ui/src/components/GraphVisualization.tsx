@@ -35,7 +35,7 @@ export interface GraphVisualizationRef {
 }
 
 const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisualizationProps>(
-  ({ apiUrl, tenantId = 'demo', onFetch }, ref) => {
+  ({ apiUrl, tenantId = 'default', onFetch }, ref) => {
   const svgRef = useRef<SVGSVGElement>(null)
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<GraphData>({ nodes: [], links: [] })

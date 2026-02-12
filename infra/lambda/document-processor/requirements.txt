@@ -15,4 +15,3 @@ llama-index-llms-bedrock-converse
 python-dotenv
 smart_open
 spacy
-PyPDF2

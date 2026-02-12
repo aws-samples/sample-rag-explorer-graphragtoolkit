@@ -145,7 +145,7 @@ export default function DocumentUpload() {
                   type="file"
                   id="file-upload"
                   multiple
-                  accept=".pdf,.txt"
+                  accept=".txt,.md"
                   style={{ display: 'none' }}
                   onChange={handleFileSelect}
                 />

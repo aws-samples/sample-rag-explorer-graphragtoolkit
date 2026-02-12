@@ -16,6 +16,12 @@ import {
   Table,
   Modal,
   ExpandableSection,
+  Tabs,
+  Badge,
+  Cards,
+  Input,
+  FormField,
+  Select,
 } from '@cloudscape-design/components'
 import { fetchAuthSession } from '@aws-amplify/auth'
 import MessageFormatter from '../components/MessageFormatter'
@@ -55,6 +61,35 @@ interface StoredDocument {
   filename?: string  // fallback for old records
   uploadedAt: string
   fileSize?: number
+  tenantId?: string
+}
+
+interface VectorChunk {
+  id: string
+  text: string
+  fullText: string
+  source: string
+  charCount: number
+}
+
+interface GraphNode {
+  id: string
+  name?: string
+  value?: string
+  type?: string
+  labels?: string[]
+}
+
+interface GraphNodesData {
+  entities: GraphNode[]
+  topics: GraphNode[]
+  statements: GraphNode[]
+  facts: GraphNode[]
+}
+
+interface RelationshipCount {
+  type: string
+  count: number
 }
 
 export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
@@ -73,9 +108,26 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
   const [loadingDocs, setLoadingDocs] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [showResetModal, setShowResetModal] = useState(false)
-  const [tenantId] = useState('demo')
+  const [tenantId, setTenantId] = useState('default')
+  const [tenantInput, setTenantInput] = useState('default')
   const [userId, setUserId] = useState<string>('anonymous')
   const graphVisualizationRef = useRef<GraphVisualizationRef>(null)
+  
+  // Exploration state
+  const [vectorChunks, setVectorChunks] = useState<VectorChunk[]>([])
+  const [loadingChunks, setLoadingChunks] = useState(false)
+  const [graphNodes, setGraphNodes] = useState<GraphNodesData | null>(null)
+  const [relationshipCounts, setRelationshipCounts] = useState<RelationshipCount[]>([])
+  const [loadingNodes, setLoadingNodes] = useState(false)
+
+  // Derive unique tenants from stored documents
+  const uniqueTenants = Array.from(new Set(
+    storedDocuments
+      .map(doc => doc.tenantId)
+      .filter((t): t is string => !!t)
+  )).sort()
+
+  const tenantOptions = uniqueTenants.map(t => ({ label: t, value: t }))
 
   useEffect(() => {
     loadConfig().then((cfg) => {
@@ -102,6 +154,20 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
       fetchStoredDocuments()
     }
   }, [uploadUrl, userId])
+
+  // Auto-select tenant from stored documents on initial load
+  useEffect(() => {
+    if (storedDocuments.length > 0) {
+      const tenants = Array.from(new Set(
+        storedDocuments.map(doc => doc.tenantId).filter((t): t is string => !!t)
+      )).sort()
+      // Only auto-select if user hasn't manually changed tenant yet
+      if (tenants.length > 0 && tenantId === 'default' && tenantInput === 'default') {
+        setTenantId(tenants[0])
+        setTenantInput(tenants[0])
+      }
+    }
+  }, [storedDocuments])
 
   const fetchGraphStats = async () => {
     if (!apiUrl) return
@@ -150,11 +216,17 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
         throw new Error(`Reset failed: ${text}`)
       }
       setUploadSuccess('Graph database reset successfully!')
+      // Reset to fresh state
       setGraphMessages([])
       setVectorMessages([])
       setFiles([])
+      setTenantId('default')
+      setTenantInput('default')
+      setVectorChunks([])
+      setGraphNodes(null)
+      setRelationshipCounts([])
+      // Refresh documents list and graph visualization
       await fetchStoredDocuments()
-      // Refresh the graph visualization
       graphVisualizationRef.current?.refresh()
     } catch (err) {
       setError(`Failed to reset graph: ${err instanceof Error ? err.message : 'Unknown error'}`)
@@ -176,6 +248,41 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
       setUploadSuccess('Document deleted successfully')
     } catch (err) {
       setError(`Failed to delete document: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    }
+  }
+
+  const fetchVectorChunks = async () => {
+    if (!apiUrl) return
+    setLoadingChunks(true)
+    try {
+      const baseUrl = apiUrl.replace(/\/$/, '')
+      const res = await signedFetch(`${baseUrl}/vector-chunks?tenant_id=${tenantId}&limit=20`, { method: 'GET' })
+      if (res.ok) {
+        const data = await res.json()
+        setVectorChunks(data.chunks || [])
+      }
+    } catch (err) {
+      console.error('Failed to fetch vector chunks:', err)
+    } finally {
+      setLoadingChunks(false)
+    }
+  }
+
+  const fetchGraphNodes = async () => {
+    if (!apiUrl) return
+    setLoadingNodes(true)
+    try {
+      const baseUrl = apiUrl.replace(/\/$/, '')
+      const res = await signedFetch(`${baseUrl}/graph-nodes?tenant_id=${tenantId}&limit=30`, { method: 'GET' })
+      if (res.ok) {
+        const data = await res.json()
+        setGraphNodes(data.nodes || null)
+        setRelationshipCounts(data.relationships || [])
+      }
+    } catch (err) {
+      console.error('Failed to fetch graph nodes:', err)
+    } finally {
+      setLoadingNodes(false)
     }
   }
 
@@ -270,7 +377,11 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
         setFiles(prev => prev.map(f => 
           f.name === file.name ? { ...f, status: 'completed' as const, chunksCreated: data.chunks_created } : f
         ))
-        setUploadSuccess(`${file.name} uploaded! (${data.chunks_created} chunks created)`)
+        if (data.already_processed) {
+          setUploadSuccess(`${file.name} was already processed, skipping re-indexing`)
+        } else {
+          setUploadSuccess(`${file.name} uploaded and indexed! (${data.chunks_created} chunks created)`)
+        }
         await fetchStoredDocuments()
       } catch (err) {
         setFiles(prev => prev.map(f => 
@@ -400,17 +511,82 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
                     )}
                   </div>
                   <div>
-                    <Box variant="awsui-key-label">Tenant</Box>
-                    <Box>{tenantId}</Box>
+                    {uniqueTenants.length > 0 ? (
+                      <FormField label="Select Tenant" description="Choose existing or create new">
+                        <SpaceBetween direction="horizontal" size="xs">
+                          <Select
+                            selectedOption={tenantOptions.find(o => o.value === tenantId) || null}
+                            onChange={({ detail }) => {
+                              if (detail.selectedOption?.value) {
+                                setTenantId(detail.selectedOption.value)
+                                setTenantInput(detail.selectedOption.value)
+                                setUploadSuccess(`Switched to tenant: ${detail.selectedOption.value}`)
+                                // Clear exploration data when switching tenants
+                                setVectorChunks([])
+                                setGraphNodes(null)
+                                setRelationshipCounts([])
+                                // Refresh graph visualization
+                                graphVisualizationRef.current?.refresh()
+                              }
+                            }}
+                            options={tenantOptions}
+                            placeholder="Select tenant"
+                            filteringType="auto"
+                          />
+                          <Input
+                            value={tenantInput}
+                            onChange={({ detail }) => setTenantInput(detail.value)}
+                            placeholder="Or new tenant"
+                          />
+                          <Button 
+                            onClick={() => {
+                              const newTenant = tenantInput || 'default'
+                              setTenantId(newTenant)
+                              setUploadSuccess(`Switched to tenant: ${newTenant}`)
+                              setVectorChunks([])
+                              setGraphNodes(null)
+                              setRelationshipCounts([])
+                              graphVisualizationRef.current?.refresh()
+                            }}
+                            disabled={!tenantInput || tenantInput === tenantId}
+                          >
+                            Set
+                          </Button>
+                        </SpaceBetween>
+                      </FormField>
+                    ) : (
+                      <FormField label="Tenant ID" description="Isolates your data">
+                        <SpaceBetween direction="horizontal" size="xs">
+                          <Input
+                            value={tenantInput}
+                            onChange={({ detail }) => setTenantInput(detail.value)}
+                            placeholder="Enter tenant ID"
+                          />
+                          <Button 
+                            onClick={() => {
+                              setTenantId(tenantInput || 'default')
+                              setUploadSuccess(`Switched to tenant: ${tenantInput || 'default'}`)
+                            }}
+                            disabled={tenantInput === tenantId}
+                          >
+                            Set
+                          </Button>
+                        </SpaceBetween>
+                      </FormField>
+                    )}
                   </div>
                   <div>
-                    <input type="file" id="file-upload" multiple accept=".txt,.pdf" style={{ display: 'none' }} onChange={handleFileSelect} />
-                    <Button iconName="upload" loading={uploading} onClick={() => document.getElementById('file-upload')?.click()}>
-                      Upload Document
-                    </Button>
+                    <Box variant="awsui-key-label">Active Tenant</Box>
+                    <Badge color="blue">{tenantId}</Badge>
                   </div>
                   <div>
-                    <Button iconName="refresh" onClick={fetchGraphStats}>Refresh</Button>
+                    <SpaceBetween direction="horizontal" size="xs">
+                      <input type="file" id="file-upload" multiple accept=".txt,.md" style={{ display: 'none' }} onChange={handleFileSelect} />
+                      <Button iconName="upload" loading={uploading} onClick={() => document.getElementById('file-upload')?.click()}>
+                        Upload
+                      </Button>
+                      <Button iconName="refresh" onClick={fetchGraphStats}>Refresh</Button>
+                    </SpaceBetween>
                   </div>
                 </ColumnLayout>
               </Container>
@@ -429,6 +605,145 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
                       onFetch={signedFetchWrapper}
                     />
                   )}
+                </Container>
+              </ExpandableSection>
+
+              {/* Data Exploration Section */}
+              <ExpandableSection headerText="🔍 Explore Your Data (Learning Mode)" defaultExpanded={false}>
+                <Container>
+                  <Tabs
+                    tabs={[
+                      {
+                        id: 'vector-chunks',
+                        label: '📄 Vector Chunks',
+                        content: (
+                          <SpaceBetween size="m">
+                            <Box color="text-body-secondary">
+                              Vector RAG stores document chunks with embeddings. When you ask a question, it finds chunks with similar embeddings.
+                              This is fast but only finds semantically similar content.
+                            </Box>
+                            <Button onClick={fetchVectorChunks} loading={loadingChunks} iconName="refresh">
+                              Load Vector Chunks
+                            </Button>
+                            {vectorChunks.length > 0 && (
+                              <Cards
+                                items={vectorChunks}
+                                cardDefinition={{
+                                  header: item => (
+                                    <SpaceBetween direction="horizontal" size="xs">
+                                      <span>📄 {item.source}</span>
+                                      <Badge color="blue">{item.charCount} chars</Badge>
+                                    </SpaceBetween>
+                                  ),
+                                  sections: [
+                                    {
+                                      id: 'text',
+                                      content: item => (
+                                        <Box variant="code" fontSize="body-s">
+                                          {item.text}
+                                        </Box>
+                                      )
+                                    }
+                                  ]
+                                }}
+                                cardsPerRow={[{ cards: 1 }, { minWidth: 600, cards: 2 }]}
+                              />
+                            )}
+                            {vectorChunks.length === 0 && !loadingChunks && (
+                              <Box textAlign="center" color="text-body-secondary" padding="l">
+                                Click "Load Vector Chunks" to see the text chunks stored in the vector index.
+                              </Box>
+                            )}
+                          </SpaceBetween>
+                        )
+                      },
+                      {
+                        id: 'graph-nodes',
+                        label: '🔗 Graph Nodes',
+                        content: (
+                          <SpaceBetween size="m">
+                            <Box color="text-body-secondary">
+                              GraphRAG extracts entities, topics, statements, and facts from your documents and connects them in a knowledge graph.
+                              This enables finding structurally related information even when it's not semantically similar.
+                            </Box>
+                            <Button onClick={fetchGraphNodes} loading={loadingNodes} iconName="refresh">
+                              Load Graph Nodes
+                            </Button>
+                            {graphNodes && (
+                              <SpaceBetween size="l">
+                                {/* Relationship Summary */}
+                                {relationshipCounts.length > 0 && (
+                                  <Container header={<Header variant="h3">Relationship Types</Header>}>
+                                    <SpaceBetween direction="horizontal" size="xs">
+                                      {relationshipCounts.slice(0, 6).map((rel, idx) => (
+                                        <Badge key={idx} color="grey">{rel.type}: {rel.count}</Badge>
+                                      ))}
+                                    </SpaceBetween>
+                                  </Container>
+                                )}
+                                
+                                {/* Entities */}
+                                {graphNodes.entities && graphNodes.entities.length > 0 && (
+                                  <Container header={<Header variant="h3">🏷️ Entities ({graphNodes.entities.length})</Header>}>
+                                    <SpaceBetween direction="horizontal" size="xs">
+                                      {graphNodes.entities.slice(0, 15).map((entity, idx) => (
+                                        <Badge key={idx} color="green">{entity.name || entity.value}</Badge>
+                                      ))}
+                                      {graphNodes.entities.length > 15 && <Badge color="grey">+{graphNodes.entities.length - 15} more</Badge>}
+                                    </SpaceBetween>
+                                  </Container>
+                                )}
+                                
+                                {/* Topics */}
+                                {graphNodes.topics && graphNodes.topics.length > 0 && (
+                                  <Container header={<Header variant="h3">📚 Topics ({graphNodes.topics.length})</Header>}>
+                                    <Table
+                                      items={graphNodes.topics.slice(0, 10)}
+                                      columnDefinitions={[
+                                        { id: 'value', header: 'Topic', cell: item => item.value }
+                                      ]}
+                                      variant="embedded"
+                                    />
+                                  </Container>
+                                )}
+                                
+                                {/* Statements */}
+                                {graphNodes.statements && graphNodes.statements.length > 0 && (
+                                  <Container header={<Header variant="h3">💬 Statements ({graphNodes.statements.length})</Header>}>
+                                    <Table
+                                      items={graphNodes.statements.slice(0, 8)}
+                                      columnDefinitions={[
+                                        { id: 'value', header: 'Statement', cell: item => item.value }
+                                      ]}
+                                      variant="embedded"
+                                    />
+                                  </Container>
+                                )}
+                                
+                                {/* Facts */}
+                                {graphNodes.facts && graphNodes.facts.length > 0 && (
+                                  <Container header={<Header variant="h3">✅ Facts ({graphNodes.facts.length})</Header>}>
+                                    <Table
+                                      items={graphNodes.facts.slice(0, 8)}
+                                      columnDefinitions={[
+                                        { id: 'value', header: 'Fact', cell: item => item.value }
+                                      ]}
+                                      variant="embedded"
+                                    />
+                                  </Container>
+                                )}
+                              </SpaceBetween>
+                            )}
+                            {!graphNodes && !loadingNodes && (
+                              <Box textAlign="center" color="text-body-secondary" padding="l">
+                                Click "Load Graph Nodes" to explore entities, topics, statements, and facts in the knowledge graph.
+                              </Box>
+                            )}
+                          </SpaceBetween>
+                        )
+                      }
+                    ]}
+                  />
                 </Container>
               </ExpandableSection>
 
@@ -493,6 +808,7 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
                     items={storedDocuments}
                     columnDefinitions={[
                       { id: 'fileName', header: 'File Name', cell: item => item.fileName || item.filename || 'Unknown' },
+                      { id: 'tenantId', header: 'Tenant', cell: item => <Badge color="grey">{item.tenantId || 'unknown'}</Badge> },
                       { id: 'uploadedAt', header: 'Uploaded', cell: item => new Date(item.uploadedAt).toLocaleString() },
                       { 
                         id: 'actions', 

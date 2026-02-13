@@ -16,7 +16,7 @@ export default function ComparisonPage() {
           header={
             <Header
               variant="h1"
-              description="Side-by-side comparison of Market Trends Agent and Graph RAG"
+              description="Side-by-side comparison of RAG approaches"
             >
               Agent Comparison Lab
             </Header>

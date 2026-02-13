@@ -126,7 +126,7 @@ export default function ChatInterface() {
                 <Box variant="h3">Welcome to Graph Agent</Box>
                 <Box>
                   Start by introducing yourself with your broker profile, or ask
-                  about market trends, stock data, or financial news.
+                  about your documents using GraphRAG or Vector RAG.
                 </Box>
               </SpaceBetween>
             </Box>
@@ -177,7 +177,7 @@ export default function ChatInterface() {
         <Textarea
           value={input}
           onChange={({ detail }) => setInput(detail.value)}
-          placeholder="Ask about market trends, stock data, or introduce yourself with your broker profile..."
+          placeholder="Ask a question about your uploaded documents..."
           rows={3}
           disabled={loading}
         />

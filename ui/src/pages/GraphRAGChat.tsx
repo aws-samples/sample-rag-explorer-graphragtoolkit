@@ -313,7 +313,7 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
     setError(null)
     try {
       const baseUrl = uploadUrl.replace(/\/$/, '')
-      const res = await signedFetch(`${baseUrl}/reset-graph?tenant_id=${tenantId}`, { method: 'POST' })
+      const res = await signedFetch(`${baseUrl}/reset-graph?tenant_id=${tenantId}&user_id=${encodeURIComponent(userId)}`, { method: 'POST' })
       if (!res.ok) {
         const text = await res.text()
         throw new Error(`Reset failed: ${text}`)
@@ -453,7 +453,7 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
         if (data.already_processed) {
           setUploadSuccess(`${file.name} was already processed, skipping re-indexing`)
         } else {
-          setUploadSuccess(`${file.name} uploaded and indexed! (${data.chunks_created} chunks created)`)
+          setUploadSuccess(`${file.name} uploaded and indexed successfully!`)
         }
         await fetchStoredDocuments()
       } catch (err) {

@@ -51,10 +51,11 @@ def get_tenant_hash(tenant_id: str) -> str:
     return hashlib.md5(tenant_id.encode()).hexdigest()[:10].lower()
 
 
-def calculate_md5(file_content: bytes, user_id: str) -> str:
-    """Calculate MD5 hash of file content + user_id for dedup."""
+def calculate_md5(file_content: bytes, user_id: str, tenant_id: str = '') -> str:
+    """Calculate MD5 hash of file content + user_id + tenant_id for dedup."""
     h = hashlib.md5()
     h.update(user_id.encode('utf-8'))
+    h.update(tenant_id.encode('utf-8'))
     h.update(file_content)
     return h.hexdigest()
 
@@ -193,7 +194,7 @@ async def process_and_index_file(
         raise HTTPException(status_code=400, detail="Only TXT and MD files are supported")
 
     file_size = len(file_content)
-    file_md5 = calculate_md5(file_content, user_id)
+    file_md5 = calculate_md5(file_content, user_id, tenant_id)
 
     # Check if this exact file has already been processed
     if is_file_processed(file_md5):
@@ -326,7 +327,10 @@ async def delete_document(
 
 
 @app.post("/reset-graph")
-async def reset_graph(tenant_id: str = Query(default="default")):
+async def reset_graph(
+    tenant_id: str = Query(default="default"),
+    user_id: str = Query(default=""),
+):
     """Reset/clear the Neptune graph for a tenant"""
     try:
         tenant_hash = get_tenant_hash(tenant_id)
@@ -348,6 +352,19 @@ async def reset_graph(tenant_id: str = Query(default="default")):
                 except Exception as inner_e:
                     print(f"Tenant-specific delete failed: {inner_e}")
                     graph_store.execute_query("MATCH (n) DETACH DELETE n", {})
+
+        # Clean up DynamoDB records for this tenant so files can be re-uploaded
+        if DOCUMENT_TABLE and user_id:
+            try:
+                docs = get_user_documents(user_id)
+                table = dynamodb.Table(DOCUMENT_TABLE)
+                for doc in docs:
+                    if doc.get('tenantId') == tenant_id:
+                        table.delete_item(Key={'userId': user_id, 's3Path': doc['s3Path']})
+                        print(f"Deleted DynamoDB record: {doc['s3Path']}")
+            except Exception as e:
+                print(f"DynamoDB cleanup error: {e}")
+
         return {
             "message": "Graph reset successfully",
             "tenant_id": tenant_id,

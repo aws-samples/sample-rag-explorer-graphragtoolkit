@@ -18,7 +18,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<Message[]>(() => {
     // Load messages from localStorage on init
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('market-trends-chat')
+      const saved = localStorage.getItem('graphrag-demo-chat')
       if (saved) {
         try {
           const parsed = JSON.parse(saved)
@@ -38,7 +38,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // Save messages to localStorage whenever they change
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('market-trends-chat', JSON.stringify(messages))
+      localStorage.setItem('graphrag-demo-chat', JSON.stringify(messages))
     }
   }, [messages])
 
@@ -49,7 +49,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const clearMessages = () => {
     setMessages([])
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('market-trends-chat')
+      localStorage.removeItem('graphrag-demo-chat')
     }
   }
 

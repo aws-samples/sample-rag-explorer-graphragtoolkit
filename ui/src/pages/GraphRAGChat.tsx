@@ -119,6 +119,7 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
   const [lastVectorChunks, setLastVectorChunks] = useState<QueryVectorChunk[]>([])
   const [lastGraphNodes, setLastGraphNodes] = useState<QueryGraphNode[]>([])
   const [lastGraphLinks, setLastGraphLinks] = useState<QueryGraphLink[]>([])
+  const [activeResultsTab, setActiveResultsTab] = useState('graph-viz')
   const graphSvgRef = useRef<SVGSVGElement>(null)
   // Derive unique tenants from stored documents
   const uniqueTenants = Array.from(new Set(
@@ -164,7 +165,7 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
 
   // D3 force graph for per-query graph visualization
   useEffect(() => {
-    if (!graphSvgRef.current || lastGraphNodes.length === 0) return
+    if (!graphSvgRef.current || lastGraphNodes.length === 0 || activeResultsTab !== 'graph-viz') return
 
     const svg = d3.select(graphSvgRef.current)
     svg.selectAll('*').remove()
@@ -269,7 +270,7 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
     })
 
     return () => { simulation.stop() }
-  }, [lastGraphNodes, lastGraphLinks])
+  }, [lastGraphNodes, lastGraphLinks, activeResultsTab])
 
   const fetchGraphStats = async () => {
     if (!apiUrl) return
@@ -689,6 +690,8 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
                   defaultExpanded={true}
                 >
                   <Tabs
+                    activeTabId={activeResultsTab}
+                    onChange={({ detail }) => setActiveResultsTab(detail.activeTabId)}
                     tabs={[
                       {
                         id: 'graph-viz',

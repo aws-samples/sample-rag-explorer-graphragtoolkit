@@ -3,7 +3,7 @@ import time
 import hashlib
 from typing import List
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from graphrag_toolkit.lexical_graph import LexicalGraphQueryEngine
@@ -47,7 +47,7 @@ class QueryResponse(BaseModel):
 
 
 class VectorRetriever(BaseRetriever):
-    """Pure vector similarity search retriever"""
+    """Pure vector similarity search retriever — matches the reference implementation."""
     
     def __init__(self, graph_store, vector_store, top_k: int = 5):
         self.graph_store = graph_store
@@ -59,32 +59,20 @@ class VectorRetriever(BaseRetriever):
         top_k_map = {r['chunk']['chunkId']: r for r in top_k_results}
         chunk_ids = list(top_k_map.keys())
         
-        # Get chunk text and resolve source filename via graph traversal
-        cypher = '''
-        MATCH (c) WHERE id(c) IN $chunkIds 
-        OPTIONAL MATCH (c)-[:`__EXTRACTED_FROM__`]->(s)
-        RETURN id(c) AS chunkId, c.value AS chunk, s.source AS sourceName, s{.*} AS sourceMeta
-        '''
+        cypher = 'MATCH (c) WHERE id(c) IN $chunkIds RETURN id(c) AS chunkId, c.value AS chunk'
         results = self.graph_store.execute_query(cypher, {'chunkIds': chunk_ids})
         
-        source_names = {}
         for r in results:
             chunk_id = r['chunkId']
-            if chunk_id in top_k_map:
-                top_k_map[chunk_id]['chunk']['value'] = r['chunk']
-                # Try to get human-readable source name
-                source_name = r.get('sourceName') or ''
-                if not source_name and r.get('sourceMeta'):
-                    source_name = r['sourceMeta'].get('source', '')
-                if source_name:
-                    source_names[chunk_id] = source_name
+            top_k_map[chunk_id]['chunk']['value'] = r['chunk']
         
+        # source from top_k is a dict: {"sourceId": "...", "metadata": {"file_name": "document.md"}}
         return [
             NodeWithScore(
                 node=TextNode(
                     text=result['chunk']['value'],
                     metadata={
-                        'source': source_names.get(result['chunk']['chunkId'], result.get('source', 'Unknown')),
+                        'source': result['source'],
                         'chunkId': result['chunk']['chunkId']
                     }
                 ),
@@ -92,6 +80,27 @@ class VectorRetriever(BaseRetriever):
             )
             for result in list(top_k_map.values())
         ]
+
+
+def source_to_name(source) -> str:
+    """Extract human-readable filename from a source value.
+    
+    The source from top_k() / graphrag is a dict like:
+      {"sourceId": "aws:c21f969b5f:...", "metadata": {"file_name": "document.md"}}
+    """
+    if isinstance(source, str):
+        return source
+    if isinstance(source, dict):
+        meta = source.get('metadata', {})
+        if isinstance(meta, dict):
+            # The toolkit stores the filename under 'file_name'
+            name = meta.get('file_name', '') or meta.get('source', '')
+            if name:
+                return name
+        elif isinstance(meta, str) and meta:
+            return meta
+        return source.get('sourceId', 'Unknown')
+    return str(source)
 
 
 def get_tenant_hash(tenant_id: str) -> str:
@@ -116,16 +125,11 @@ def vector_query(query: str, tenant_id: str, graph_store, vector_store) -> dict:
     query_bundle = to_embedded_query(QueryBundle(query), GraphRAGConfig.embed_model)
     results = retriever.retrieve(query_bundle)
     
-    context = '\n\n'.join([f"Source: {n.metadata.get('source', 'Unknown')}\n{n.text}" for n in results])
+    context = '\n\n'.join([
+        f"Source: {source_to_name(n.metadata.get('source', 'Unknown'))}\n{n.text}" 
+        for n in results
+    ])
     response = generate_response(query, context)
-    
-    def _source_str(meta_source):
-        """Extract a display string from source metadata which may be a string or dict."""
-        if isinstance(meta_source, str):
-            return meta_source
-        if isinstance(meta_source, dict):
-            return meta_source.get('metadata', {}).get('source', meta_source.get('sourceId', 'Unknown'))
-        return str(meta_source)
     
     # Return chunks used for this query
     chunks = []
@@ -133,14 +137,14 @@ def vector_query(query: str, tenant_id: str, graph_store, vector_store) -> dict:
         text = n.text or ''
         chunks.append({
             "text": text[:500] + '...' if len(text) > 500 else text,
-            "source": _source_str(n.metadata.get('source', 'Unknown')),
+            "source": source_to_name(n.metadata.get('source', 'Unknown')),
             "score": n.score,
             "charCount": len(text)
         })
     
     return {
         "response": response,
-        "sources": [{"text": n.text, "score": n.score, "source": _source_str(n.metadata.get('source', 'Unknown'))} for n in results],
+        "sources": [{"text": n.text, "score": n.score, "source": source_to_name(n.metadata.get('source', 'Unknown'))} for n in results],
         "chunks": chunks,
         "time_ms": (time.time() - start) * 1000
     }
@@ -174,8 +178,7 @@ def graphrag_query(query: str, tenant_id: str, graph_store, vector_store) -> dic
         source_id = ''
         if isinstance(source, dict):
             source_id = source.get('sourceId', f'source_{idx}')
-            source_meta = source.get('metadata', {})
-            source_name = source_meta.get('source', source_id)
+            source_name = source_to_name(source)
         else:
             source_id = f'source_{idx}'
             source_name = str(source)

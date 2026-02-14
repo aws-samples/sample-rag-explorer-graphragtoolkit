@@ -313,41 +313,26 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
     setError(null)
     try {
       const baseUrl = uploadUrl.replace(/\/$/, '')
-      const res = await signedFetch(`${baseUrl}/reset-graph?tenant_id=${tenantId}&user_id=${encodeURIComponent(userId)}`, { method: 'POST' })
+      const res = await signedFetch(`${baseUrl}/reset-graph?user_id=${encodeURIComponent(userId)}`, { method: 'POST' })
       if (!res.ok) {
         const text = await res.text()
         throw new Error(`Reset failed: ${text}`)
       }
-      setUploadSuccess('Graph database reset successfully!')
+      setUploadSuccess('Full reset completed — graph, documents, and S3 files have been deleted.')
       setGraphMessages([])
       setVectorMessages([])
       setFiles([])
+      setStoredDocuments([])
       setTenantId('default')
       setTenantInput('default')
       setLastVectorChunks([])
       setLastGraphNodes([])
       setLastGraphLinks([])
-      await fetchStoredDocuments()
     } catch (err) {
-      setError(`Failed to reset graph: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      setError(`Failed to reset: ${err instanceof Error ? err.message : 'Unknown error'}`)
     } finally {
       setResetting(false)
       setShowResetModal(false)
-    }
-  }
-
-  const handleDeleteDocument = async (s3Path: string) => {
-    try {
-      const baseUrl = uploadUrl.replace(/\/$/, '')
-      const res = await signedFetch(
-        `${baseUrl}/documents?user_id=${encodeURIComponent(userId)}&s3_path=${encodeURIComponent(s3Path)}`,
-        { method: 'DELETE' }
-      )
-      if (!res.ok) throw new Error('Delete failed')
-      await fetchStoredDocuments()
-      setUploadSuccess('Document deleted successfully')
-    } catch (err) {
-      setError(`Failed to delete document: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
   }
 
@@ -521,7 +506,7 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
       <Modal
         visible={showResetModal}
         onDismiss={() => setShowResetModal(false)}
-        header="Reset Knowledge Graph"
+        header="Reset Everything"
         footer={
           <Box float="right">
             <SpaceBetween direction="horizontal" size="xs">
@@ -534,8 +519,8 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
         }
       >
         <Box>
-          Are you sure you want to reset the knowledge graph? This will delete all nodes and relationships
-          for tenant "{tenantId}". Your uploaded documents will remain in S3 but will need to be re-indexed.
+          Are you sure you want to reset everything? This will delete the entire knowledge graph,
+          all uploaded documents from S3, and all document records. You will start completely fresh.
         </Box>
       </Modal>
 
@@ -817,17 +802,6 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
                       { id: 'fileName', header: 'File Name', cell: item => item.fileName || item.filename || 'Unknown' },
                       { id: 'tenantId', header: 'Tenant', cell: item => <Badge color="grey">{item.tenantId || 'unknown'}</Badge> },
                       { id: 'uploadedAt', header: 'Uploaded', cell: item => new Date(item.uploadedAt).toLocaleString() },
-                      {
-                        id: 'actions',
-                        header: 'Actions',
-                        cell: item => (
-                          <Button
-                            iconName="remove"
-                            variant="icon"
-                            onClick={() => handleDeleteDocument(item.s3Path)}
-                          />
-                        )
-                      },
                     ]}
                     variant="embedded"
                   />

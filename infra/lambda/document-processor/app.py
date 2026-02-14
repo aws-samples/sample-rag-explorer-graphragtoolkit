@@ -328,12 +328,11 @@ async def delete_document(
 
 @app.post("/reset-graph")
 async def reset_graph(
-    tenant_id: str = Query(default="default"),
     user_id: str = Query(default=""),
 ):
-    """Reset/clear the Neptune graph for a tenant"""
+    """Full reset: clear Neptune graph, delete all DynamoDB records and S3 files for the user."""
     try:
-        tenant_hash = get_tenant_hash(tenant_id)
+        # 1. Clear the entire Neptune graph
         try:
             response = neptune_client.execute_query(
                 graphIdentifier=NEPTUNE_GRAPH_ID,
@@ -344,31 +343,34 @@ async def reset_graph(
         except Exception as e:
             print(f"Neptune API delete failed: {e}")
             with GraphStoreFactory.for_graph_store(GRAPH_STORE_CONFIG) as graph_store:
-                try:
-                    graph_store.execute_query(
-                        "MATCH (n) WHERE n.`~tenantId` = $tenantId OR n.tenantId = $tenantId DETACH DELETE n",
-                        {'tenantId': tenant_hash}
-                    )
-                except Exception as inner_e:
-                    print(f"Tenant-specific delete failed: {inner_e}")
-                    graph_store.execute_query("MATCH (n) DETACH DELETE n", {})
+                graph_store.execute_query("MATCH (n) DETACH DELETE n", {})
 
-        # Clean up DynamoDB records for this tenant so files can be re-uploaded
+        # 2. Delete all S3 files and DynamoDB records for this user
+        deleted_s3 = 0
+        deleted_dynamo = 0
         if DOCUMENT_TABLE and user_id:
             try:
                 docs = get_user_documents(user_id)
                 table = dynamodb.Table(DOCUMENT_TABLE)
                 for doc in docs:
-                    if doc.get('tenantId') == tenant_id:
-                        table.delete_item(Key={'userId': user_id, 's3Path': doc['s3Path']})
-                        print(f"Deleted DynamoDB record: {doc['s3Path']}")
+                    # Delete S3 object
+                    s3_path = doc.get('s3Path', '')
+                    if S3_BUCKET and s3_path:
+                        try:
+                            s3_client.delete_object(Bucket=S3_BUCKET, Key=s3_path)
+                            deleted_s3 += 1
+                        except Exception as e:
+                            print(f"S3 delete error for {s3_path}: {e}")
+                    # Delete DynamoDB record
+                    table.delete_item(Key={'userId': user_id, 's3Path': s3_path})
+                    deleted_dynamo += 1
             except Exception as e:
-                print(f"DynamoDB cleanup error: {e}")
+                print(f"Cleanup error: {e}")
 
         return {
-            "message": "Graph reset successfully",
-            "tenant_id": tenant_id,
-            "tenant_hash": tenant_hash
+            "message": "Full reset completed",
+            "deleted_s3_files": deleted_s3,
+            "deleted_dynamo_records": deleted_dynamo,
         }
     except Exception as e:
         print(f"Reset graph error: {e}")

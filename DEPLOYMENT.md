@@ -1,73 +1,51 @@
-# GraphRAG Demo - AWS Deployment Guide
-
-Complete guide for deploying the GraphRAG Neptune Analytics demo to AWS.
+# GraphRAG Demo — AWS Deployment Guide
 
 ## Architecture Overview
 
 | Component | Service | Purpose |
 |-----------|---------|---------|
-| Frontend | S3 + CloudFront | React SPA hosting |
-| Query API | Lambda (Docker) | GraphRAG and Vector queries |
-| Upload API | Lambda (Docker) | Document processing and indexing |
-| Graph + Vector Store | Neptune Analytics | Knowledge graph and embeddings |
-| Auth | Cognito | User authentication and IAM credentials |
-| Document Storage | S3 | Raw document storage |
-| Document Registry | DynamoDB | User document metadata |
+| Frontend | S3 + CloudFront | React SPA hosting (Vite + Cloudscape) |
+| Query API | Lambda (Docker) | GraphRAG and Vector RAG queries, per-query results |
+| Upload API | Lambda (Docker) | Document upload, MD5 dedup, S3 storage, graph indexing |
+| Graph + Vector Store | Neptune Analytics | Knowledge graph and vector embeddings (single store) |
+| Auth | Cognito | User Pool + Identity Pool, SigV4 credentials |
+| Document Storage | S3 | Raw documents under `private/{user_id}/{tenant_id}/documents/` |
+| Document Registry | DynamoDB | Document metadata + MD5 dedup index (GSI) |
 
 ## Prerequisites
 
 ### Required Tools
 
 ```bash
-# Check Node.js (18+ required)
-node --version
-
-# Check npm
+node --version    # 18+ required
 npm --version
-
-# Check Docker
-docker --version
-
-# Check AWS CLI
+docker --version  # For Lambda container images
 aws --version
-
-# Install CDK CLI
-npm install -g aws-cdk
-cdk --version
+cdk --version     # npm install -g aws-cdk
 ```
 
 ### AWS Configuration
 
 ```bash
-# Configure AWS credentials
 aws configure
-
-# Verify access
 aws sts get-caller-identity
 ```
 
-Required IAM permissions:
-- CloudFormation full access
-- Lambda, S3, DynamoDB, CloudFront, Cognito management
-- Neptune Analytics management
-- Bedrock model access
-- IAM role creation
+Required IAM permissions: CloudFormation, Lambda, S3, DynamoDB, CloudFront, Cognito, Neptune Analytics, Bedrock, IAM role creation.
 
 ### Enable Bedrock Models
 
-In the AWS Console, navigate to **Amazon Bedrock** → **Model access** and enable:
-- **Claude 3 Sonnet** (or Claude 3.5 Sonnet) - for extraction and generation
-- **Titan Text Embeddings V2** - for vector embeddings
+In the AWS Console → **Amazon Bedrock** → **Model access**, enable:
+- **Claude 3 Sonnet** (or Claude 3.5 Sonnet) — extraction and response generation
+- **Titan Text Embeddings V2** — vector embeddings (1024 dimensions)
 
-## Deployment Steps
+## Deployment
 
 ### 1. Clone and Install
 
 ```bash
 git clone git@ssh.gitlab.aws.dev:adichap/graphrag-neptune-analytics.git
 cd graphrag-neptune-analytics
-
-# Install infrastructure dependencies
 cd infra
 npm install
 ```
@@ -78,31 +56,29 @@ npm install
 cdk bootstrap
 ```
 
-### 3. Deploy the Stack
+### 3. Deploy
 
 ```bash
 DOCKER_BUILDKIT=1 npx cdk deploy --require-approval never
 ```
 
 This deploys:
-- Neptune Analytics graph (128 GB, public connectivity)
-- Document Processor Lambda with Function URL
-- Query Handler Lambda with Function URL
+- Neptune Analytics graph (128 GB, public connectivity, vector search enabled)
+- Document Processor Lambda (Docker, 3 GB RAM, 15 min timeout) with Function URL
+- Query Handler Lambda (Docker, 3 GB RAM, 5 min timeout) with Function URL
 - S3 buckets for documents and frontend
-- DynamoDB table for document registry
+- DynamoDB table with MD5 GSI for document registry
 - Cognito User Pool and Identity Pool
-- CloudFront distribution
-- IAM roles and policies
+- CloudFront distribution with SPA error handling
+- IAM roles: authenticated users get `lambda:InvokeFunctionUrl` + `lambda:InvokeFunction`
+- Frontend built and deployed to S3 with `appconfig.json` runtime config
 
-**Deployment time**: ~15-20 minutes (Neptune Analytics creation takes the longest)
+**Deployment time**: ~15-20 minutes (Neptune Analytics creation is the bottleneck).
 
 ### 4. Note the Outputs
 
-After deployment, CDK outputs:
-
 ```
-Outputs:
-GraphRAGStack.FrontendURL = https://d1iz456wqetrpu.cloudfront.net
+GraphRAGStack.FrontendURL = https://xxxxxxxxxx.cloudfront.net
 GraphRAGStack.QueryApiURL = https://xxx.lambda-url.us-west-2.on.aws/
 GraphRAGStack.UploadApiURL = https://xxx.lambda-url.us-west-2.on.aws/
 GraphRAGStack.DocumentsBucketName = graphragstack-documentsbucket-xxx
@@ -112,11 +88,9 @@ GraphRAGStack.UserPoolClientId = xxxxxxxxxxxxxxxxxxxxxxxxxx
 GraphRAGStack.IdentityPoolId = us-west-2:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
-## Configuration
+## Frontend Configuration
 
-### Frontend Configuration
-
-The frontend is automatically configured during deployment. The `appconfig.json` file is generated and deployed to S3 with:
+The frontend is automatically configured during deployment. CDK generates `appconfig.json` and deploys it to S3:
 
 ```json
 {
@@ -124,6 +98,7 @@ The frontend is automatically configured during deployment. The `appconfig.json`
   "uploadApiUrl": "<UploadApiURL>",
   "region": "us-west-2",
   "bucketName": "<DocumentsBucketName>",
+  "documentTableName": "<DocumentRegistryTableName>",
   "auth": {
     "user_pool_id": "<UserPoolId>",
     "user_pool_client_id": "<UserPoolClientId>",
@@ -132,93 +107,63 @@ The frontend is automatically configured during deployment. The `appconfig.json`
 }
 ```
 
-### Embedding Model Configuration
+No manual configuration needed for production deployments.
 
-The stack uses Titan Text Embeddings V2 (1024 dimensions) by default. To change:
+## API Endpoints
 
-Edit `infra/bin/infra.ts`:
+### Document Processor Lambda
 
-```typescript
-new GraphRAGStack(app, 'GraphRAGStack', {
-  embedding: {
-    model: 'amazon.titan-embed-text-v2:0',
-    size: 1024,
-  },
-  // ...
-});
-```
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/upload-json` | POST | Upload document (base64 JSON body). Query params: `tenant_id`, `user_id` |
+| `/documents` | GET | List user's documents. Query param: `user_id` |
+| `/documents` | DELETE | Delete a document. Query params: `user_id`, `s3_path` |
+| `/reset-graph` | POST | Reset Neptune graph + clean DynamoDB records. Query params: `tenant_id`, `user_id` |
+| `/health` | GET | Health check |
 
-## Local Development
+### Query Handler Lambda
 
-### Running the Local API
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/query` | POST | Query both Vector RAG and GraphRAG. Body: `{ query, tenant_id }`. Returns responses, vector_chunks, graph_nodes, graph_links |
+| `/health` | GET | Health check |
 
-```bash
-# Set environment variables
-export GRAPH_STORE="neptune-graph://<NeptuneGraphId>"
-export VECTOR_STORE="neptune-graph://<NeptuneGraphId>"
-export S3_BUCKET="<DocumentsBucketName>"
-export DOCUMENT_TABLE="<DocumentRegistryTableName>"
+## Supported File Types
 
-# Run the API
-cd app
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
-```
+- `.txt` — plain text, chunked with `SentenceSplitter` (512 chars, 50 overlap)
+- `.md` — Markdown, parsed with `MarkdownNodeParser` then `SentenceSplitter`
 
-### Running the Frontend Locally
+PDF is not supported.
 
-```bash
-cd ui
+## Multi-Tenancy
 
-# Create .env file
-cat > .env << EOF
-VITE_QUERY_API_URL=http://localhost:8000
-VITE_UPLOAD_API_URL=http://localhost:8000
-EOF
-
-npm install
-npm run dev
-```
+- Each tenant's data is isolated via the graphrag-toolkit's `tenant_id` mechanism
+- Tenant ID is hashed (`md5(tenant_id)[:10]`) before passing to the toolkit
+- S3 path: `private/{user_id}/{tenant_id}/documents/`
+- MD5 dedup is scoped to user + tenant + file content
+- Graph reset cleans up both Neptune data and DynamoDB records for the tenant
 
 ## Updating the Deployment
 
-### Code Changes
-
-After modifying Lambda code or frontend:
+After code changes (Lambda or frontend):
 
 ```bash
 cd infra
 DOCKER_BUILDKIT=1 npx cdk deploy --require-approval never
 ```
 
-### Infrastructure Changes
-
-CDK handles infrastructure updates automatically. For Neptune Analytics changes that require replacement, data will be lost.
+CDK rebuilds Docker images and the frontend automatically.
 
 ## Cleanup
-
-### Destroy the Stack
 
 ```bash
 cd infra
 cdk destroy
 ```
 
-This removes all resources including:
-- Neptune Analytics graph (and all data)
-- Lambda functions
-- S3 buckets (auto-deleted with contents)
-- DynamoDB table
-- Cognito pools
-- CloudFront distribution
+This removes all resources including Neptune Analytics (and all graph data), Lambda functions, S3 buckets, DynamoDB table, Cognito pools, and CloudFront distribution.
 
-### Manual Cleanup (if needed)
-
-If `cdk destroy` fails:
-
-1. Empty S3 buckets manually in the console
-2. Delete CloudFormation stack from the console
-3. Check for orphaned Neptune Analytics graphs
+If `cdk destroy` fails: empty S3 buckets manually in the console, then delete the CloudFormation stack.
 
 ## Troubleshooting
 
@@ -228,45 +173,26 @@ Since October 2025, Lambda Function URLs require both permissions:
 - `lambda:InvokeFunctionUrl`
 - `lambda:InvokeFunction`
 
-The CDK stack includes both. If you see 403 errors, verify the Cognito authenticated role has both permissions.
+The CDK stack includes both on the Cognito authenticated role. If you see 403 errors, verify the role has both permissions.
 
 ### CORS Errors
 
-Lambda Function URLs handle CORS via configuration (not middleware). The stack configures:
-- `allowedOrigins: ['*']`
-- `allowedHeaders: ['x-amz-security-token', 'x-amz-date', 'x-amz-content-sha256', 'content-type', 'accept', 'authorization']`
-- `allowCredentials: true`
+Lambda Function URLs handle CORS via their built-in configuration (not application middleware). The stack configures `allowedOrigins: ['*']` with the required SigV4 headers. Do not add custom CORS middleware in the Lambda apps.
 
-### Neptune Analytics Connection Issues
+### Neptune Analytics Connection
 
-Neptune Analytics is configured with `publicConnectivity: true`. Ensure:
-- Your Lambda execution role has `neptune-graph:*` permissions
-- The graph ID in environment variables is correct
+Neptune Analytics is configured with `publicConnectivity: true`. Lambda execution roles have `neptune-graph:*` permissions. The graph ID is passed via environment variables.
 
-### Bedrock Model Access
+### Bedrock Access Denied
 
-If you see "Access denied" errors for Bedrock:
-1. Go to AWS Console → Bedrock → Model access
-2. Enable the required models (Claude, Titan Embeddings)
-3. Wait a few minutes for propagation
+Go to AWS Console → Bedrock → Model access → enable Claude 3 Sonnet and Titan Text Embeddings V2. Wait a few minutes for propagation.
+
+### "Already Processed" on Upload
+
+The dedup check uses `md5(user_id + tenant_id + file_content)` against a DynamoDB GSI. If you reset the graph and want to re-upload the same files, the reset now also cleans up DynamoDB records for that tenant. If stale records remain, delete them via the UI's document list or directly in DynamoDB.
 
 ## Cost Optimization
 
-### Development
-
-- Use `cdk destroy` when not actively developing
-- Neptune Analytics charges ~$12.80/hour for 128 GB minimum
-
-### Production
-
-- Consider reserved capacity for Neptune Analytics
-- Enable CloudFront caching for static assets
-- Use Bedrock batch inference for large document sets
-
-## Security Considerations
-
-- All API calls require Cognito authentication
-- Lambda Function URLs use AWS_IAM auth type
-- S3 documents are isolated per user (cognito-identity.amazonaws.com:sub)
-- DynamoDB access is scoped to user's own records
-- No public endpoints except CloudFront (which serves static files only)
+- **Destroy the stack** when not actively using it — Neptune Analytics charges ~$12.80/hour for 128 GB minimum
+- Lambda and Bedrock are pay-per-use
+- S3/DynamoDB/CloudFront costs are minimal for demo usage

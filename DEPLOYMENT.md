@@ -44,7 +44,7 @@ In the AWS Console → **Amazon Bedrock** → **Model access**, enable:
 ### 1. Clone and Install
 
 ```bash
-git clone git@ssh.gitlab.aws.dev:adichap/graphrag-neptune-analytics.git
+git clone <your-repo-url>
 cd graphrag-neptune-analytics
 cd infra
 npm install
@@ -59,7 +59,7 @@ cdk bootstrap
 ### 3. Deploy
 
 ```bash
-DOCKER_BUILDKIT=1 npx cdk deploy --require-approval never
+cdk deploy
 ```
 
 This deploys:
@@ -149,7 +149,7 @@ After code changes (Lambda or frontend):
 
 ```bash
 cd infra
-DOCKER_BUILDKIT=1 npx cdk deploy --require-approval never
+cdk deploy
 ```
 
 CDK rebuilds Docker images and the frontend automatically.

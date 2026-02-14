@@ -129,13 +129,13 @@ GraphRAG builds a knowledge graph connecting: Example Corp → AnyCompany Logist
 ### Deploy
 
 ```bash
-git clone git@ssh.gitlab.aws.dev:adichap/graphrag-neptune-analytics.git
+git clone <your-repo-url>
 cd graphrag-neptune-analytics
 
 cd infra
 npm install
 cdk bootstrap  # First time only
-DOCKER_BUILDKIT=1 npx cdk deploy --require-approval never
+cdk deploy
 ```
 
 Deployment takes ~15-20 minutes (Neptune Analytics creation is the bottleneck).
@@ -165,7 +165,7 @@ Deployment takes ~15-20 minutes (Neptune Analytics creation is the bottleneck).
 │       │   └── GraphRAGChat.tsx  # Main UI: comparison, upload, visualization
 │       └── components/
 │           └── MessageFormatter.tsx
-├── app/                    # Local development FastAPI app (optional)
+├── sample-data/            # Example documents for the AnyCompany scenario
 ├── README.md
 └── DEPLOYMENT.md
 ```
@@ -184,6 +184,16 @@ Deployment takes ~15-20 minutes (Neptune Analytics creation is the bottleneck).
 | Storage | Amazon S3 + DynamoDB |
 | IaC | AWS CDK (TypeScript) |
 | GraphRAG Framework | [graphrag-toolkit](https://github.com/awslabs/graphrag-toolkit) (LexicalGraphIndex, LexicalGraphQueryEngine) |
+
+## Important: Understanding the Lexical Graph
+
+The graphrag-toolkit does not build a traditional knowledge graph with deduplicated entities. Instead, it builds a **lexical graph** — best understood as a *repository of statements*. All other node types (sources, topics, entities, facts) serve specific roles at retrieval time to help find relevant statements.
+
+During extraction, the toolkit processes each text chunk independently using an LLM. When the same concept (e.g., "AnyCompany") appears across multiple chunks, it may be extracted multiple times with slight variations — "AnyCompany", "AnyCompany Inc.", "the company", etc. This is by design. There is no built-in entity resolution or deduplication step, because the retrieval process is designed to be tolerant of this kind of variation and redundancy. Much like distributed systems are designed with the assumption that "systems will always fail", the toolkit assumes that "extraction will always be messy" and optimizes for that reality rather than requiring a perfectly resolved set of entities.
+
+In practice, this means the graph visualization may appear cluttered with near-duplicate nodes, but **query quality is not affected** — the traversal and reranking mechanisms handle redundancy gracefully.
+
+If you want to reduce this redundancy, you can add an entity-resolution or enrichment step between the extract and build phases: extract first, then preprocess the extracted LlamaIndex nodes before feeding them into the build phase. See the [lexical-graph documentation](https://github.com/awslabs/graphrag-toolkit/tree/main/docs/lexical-graph) for more details.
 
 ## Cost Considerations
 

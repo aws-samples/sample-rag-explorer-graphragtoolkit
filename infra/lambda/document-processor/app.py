@@ -2,7 +2,7 @@ import os
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 
-# Monkey patch ProcessPoolExecutor to avoid multiprocessing issues in Lambda
+# Monkey-patch ProcessPoolExecutor to avoid multiprocessing issues in Lambda
 original_ProcessPoolExecutor = concurrent.futures.ProcessPoolExecutor
 concurrent.futures.ProcessPoolExecutor = ThreadPoolExecutor
 
@@ -14,7 +14,6 @@ os.environ['OMP_NUM_THREADS'] = '1'
 os.environ['MKL_NUM_THREADS'] = '1'
 os.environ['PYTHONHASHSEED'] = '0'
 
-import json
 import tempfile
 import hashlib
 import boto3
@@ -22,7 +21,7 @@ from datetime import datetime
 from typing import Optional, List
 from decimal import Decimal
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Query
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from pydantic import BaseModel
 from boto3.dynamodb.conditions import Key
 
@@ -91,13 +90,6 @@ def save_document_metadata(user_id: str, tenant_id: str, s3_path: str, filename:
     })
 
 
-def delete_document_metadata(user_id: str, s3_path: str):
-    if not DOCUMENT_TABLE:
-        return
-    table = dynamodb.Table(DOCUMENT_TABLE)
-    table.delete_item(Key={'userId': user_id, 's3Path': s3_path})
-
-
 def get_user_documents(user_id: str) -> List[dict]:
     if not DOCUMENT_TABLE:
         return []
@@ -117,11 +109,9 @@ def get_user_documents(user_id: str) -> List[dict]:
 # ==================== INDEXING ====================
 
 def index_single_document(file_content: bytes, filename: str, tenant_id: str) -> dict:
-    """Index a single document into the graph. The toolkit's extract_and_build
-    is additive — it adds to the existing graph for the tenant."""
+    """Index a single document into the graph (additive per tenant)."""
     tenant_hash = get_tenant_hash(tenant_id)
 
-    # Determine file extension and choose chunking strategy
     is_md = filename.lower().endswith('.md')
     suffix = '.md' if is_md else '.txt'
 
@@ -153,7 +143,7 @@ def index_single_document(file_content: bytes, filename: str, tenant_id: str) ->
             )
             docs = reader.load_data()
 
-            # Count chunks for metadata
+            # Count chunks for reporting
             splitter = SentenceSplitter(chunk_size=512, chunk_overlap=50)
             chunk_count = len(splitter.get_nodes_from_documents(docs))
 
@@ -196,7 +186,6 @@ async def process_and_index_file(
     file_size = len(file_content)
     file_md5 = calculate_md5(file_content, user_id, tenant_id)
 
-    # Check if this exact file has already been processed
     if is_file_processed(file_md5):
         return {
             "message": "Document already processed, skipping indexing",
@@ -218,11 +207,10 @@ async def process_and_index_file(
             ContentType=content_type
         )
 
-    # Index just this file (extract_and_build is additive to the tenant's graph)
     try:
         index_result = index_single_document(file_content, filename, tenant_id)
     except Exception as e:
-        # Clean up: remove S3 object if indexing fails so user can retry
+        # Remove S3 object on indexing failure so user can retry
         if S3_BUCKET and s3_key:
             try:
                 s3_client.delete_object(Bucket=S3_BUCKET, Key=s3_key)
@@ -230,7 +218,7 @@ async def process_and_index_file(
                 pass
         raise e
 
-    # Save metadata to DynamoDB (only after successful indexing)
+    # Save to DynamoDB after successful indexing
     if s3_key:
         save_document_metadata(
             user_id=user_id,
@@ -307,32 +295,12 @@ async def list_documents(user_id: str = Query(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/documents")
-async def delete_document(
-    user_id: str = Query(...),
-    s3_path: str = Query(...)
-):
-    """Delete a document from S3 and DynamoDB"""
-    try:
-        if S3_BUCKET and s3_path:
-            try:
-                s3_client.delete_object(Bucket=S3_BUCKET, Key=s3_path)
-            except Exception as e:
-                print(f"S3 delete error: {e}")
-        delete_document_metadata(user_id, s3_path)
-        return {"message": "Document deleted successfully", "s3_path": s3_path}
-    except Exception as e:
-        print(f"Delete document error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.post("/reset-graph")
 async def reset_graph(
     user_id: str = Query(default=""),
 ):
     """Full reset: clear Neptune graph, delete all DynamoDB records and S3 files for the user."""
     try:
-        # 1. Clear the entire Neptune graph
         try:
             response = neptune_client.execute_query(
                 graphIdentifier=NEPTUNE_GRAPH_ID,
@@ -345,7 +313,7 @@ async def reset_graph(
             with GraphStoreFactory.for_graph_store(GRAPH_STORE_CONFIG) as graph_store:
                 graph_store.execute_query("MATCH (n) DETACH DELETE n", {})
 
-        # 2. Delete all S3 files and DynamoDB records for this user
+        # Clean up S3 files and DynamoDB records
         deleted_s3 = 0
         deleted_dynamo = 0
         if DOCUMENT_TABLE and user_id:
@@ -353,7 +321,6 @@ async def reset_graph(
                 docs = get_user_documents(user_id)
                 table = dynamodb.Table(DOCUMENT_TABLE)
                 for doc in docs:
-                    # Delete S3 object
                     s3_path = doc.get('s3Path', '')
                     if S3_BUCKET and s3_path:
                         try:
@@ -361,7 +328,6 @@ async def reset_graph(
                             deleted_s3 += 1
                         except Exception as e:
                             print(f"S3 delete error for {s3_path}: {e}")
-                    # Delete DynamoDB record
                     table.delete_item(Key={'userId': user_id, 's3Path': s3_path})
                     deleted_dynamo += 1
             except Exception as e:

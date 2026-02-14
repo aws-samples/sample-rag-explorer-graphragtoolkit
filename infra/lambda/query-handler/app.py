@@ -47,7 +47,7 @@ class QueryResponse(BaseModel):
 
 
 class VectorRetriever(BaseRetriever):
-    """Pure vector similarity search retriever — matches the reference implementation."""
+    """Pure vector similarity retriever using chunk embeddings."""
     
     def __init__(self, graph_store, vector_store, top_k: int = 5):
         self.graph_store = graph_store
@@ -63,18 +63,13 @@ class VectorRetriever(BaseRetriever):
         results = self.graph_store.execute_query(cypher, {'chunkIds': chunk_ids})
         
         for r in results:
-            chunk_id = r['chunkId']
-            top_k_map[chunk_id]['chunk']['value'] = r['chunk']
+            top_k_map[r['chunkId']]['chunk']['value'] = r['chunk']
         
-        # source from top_k is a dict: {"sourceId": "...", "metadata": {"file_name": "document.md"}}
         return [
             NodeWithScore(
                 node=TextNode(
                     text=result['chunk']['value'],
-                    metadata={
-                        'source': result['source'],
-                        'chunkId': result['chunk']['chunkId']
-                    }
+                    metadata={'source': result['source'], 'chunkId': result['chunk']['chunkId']}
                 ),
                 score=result['score']
             )
@@ -83,17 +78,14 @@ class VectorRetriever(BaseRetriever):
 
 
 def source_to_name(source) -> str:
-    """Extract human-readable filename from a source value.
-    
-    The source from top_k() / graphrag is a dict like:
-      {"sourceId": "aws:c21f969b5f:...", "metadata": {"file_name": "document.md"}}
+    """Extract filename from a toolkit source dict.
+    Structure: {"sourceId": "aws:...", "metadata": {"file_name": "doc.md"}}
     """
     if isinstance(source, str):
         return source
     if isinstance(source, dict):
         meta = source.get('metadata', {})
         if isinstance(meta, dict):
-            # The toolkit stores the filename under 'file_name'
             name = meta.get('file_name', '') or meta.get('source', '')
             if name:
                 return name
@@ -131,7 +123,6 @@ def vector_query(query: str, tenant_id: str, graph_store, vector_store) -> dict:
     ])
     response = generate_response(query, context)
     
-    # Return chunks used for this query
     chunks = []
     for n in results:
         text = n.text or ''
@@ -157,8 +148,7 @@ def graphrag_query(query: str, tenant_id: str, graph_store, vector_store) -> dic
     )
     response = query_engine.query(query)
     
-    # Extract graph structure from source_nodes metadata for visualization
-    # Each source_node has metadata['result'] with: source, topics[], each topic has statements[], each statement has facts[]
+    # Build graph structure from source_nodes for D3 visualization
     graph_nodes = []
     graph_links = []
     seen_nodes = set()
@@ -173,7 +163,6 @@ def graphrag_query(query: str, tenant_id: str, graph_store, vector_store) -> dic
         meta = node.metadata or {}
         result = meta.get('result', {})
         
-        # Source node
         source = result.get('source', {})
         source_id = ''
         if isinstance(source, dict):
@@ -184,7 +173,6 @@ def graphrag_query(query: str, tenant_id: str, graph_store, vector_store) -> dic
             source_name = str(source)
         add_node(source_id, source_name, 'source')
         
-        # Topics and their statements/facts
         for t_idx, topic in enumerate(result.get('topics', [])):
             topic_name = topic.get('topic', f'Topic {t_idx}')
             topic_id = topic.get('topicId', f'{source_id}_topic_{t_idx}')

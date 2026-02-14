@@ -236,17 +236,7 @@ function App() {
   );
 }
 
-// Export helper to get auth session for signed requests
-export async function getAuthSession() {
-  try {
-    const session = await fetchAuthSession();
-    return session;
-  } catch {
-    return null;
-  }
-}
-
-// Helper to make signed requests to Lambda Function URLs with IAM auth
+// SigV4-signed fetch for Lambda Function URLs with IAM auth
 export async function signedFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const [session, config] = await Promise.all([
     fetchAuthSession(),
@@ -284,8 +274,7 @@ export async function signedFetch(url: string, options: RequestInit = {}): Promi
     sha256: Sha256,
   });
 
-  // Build headers for signing - must include host
-  // Only include Content-Type if there's a body (POST/PUT requests)
+  // Build headers for signing
   const headersToSign: Record<string, string> = {
     host: parsedUrl.hostname,
   };
@@ -293,26 +282,6 @@ export async function signedFetch(url: string, options: RequestInit = {}): Promi
     headersToSign['content-type'] = 'application/json';
   }
 
-  // Build the path with query string - use the raw search string from URL
-  // The URL constructor already handles encoding, so we use it as-is
-  const pathWithQuery = parsedUrl.pathname + parsedUrl.search;
-
-  console.log('Signing request with credentials:', {
-    accessKeyId: credentials.accessKeyId.substring(0, 12) + '...',
-    hasSecretKey: !!credentials.secretAccessKey,
-    hasSessionToken: !!credentials.sessionToken,
-    region,
-  });
-  
-  console.log('Request to sign:', {
-    method,
-    hostname: parsedUrl.hostname,
-    path: pathWithQuery,
-    headersToSign: Object.keys(headersToSign),
-    hasBody: !!body,
-  });
-
-  // Sign the request - pass query as separate object for proper handling
   const queryParams: Record<string, string> = {};
   parsedUrl.searchParams.forEach((value, key) => {
     queryParams[key] = value;
@@ -328,8 +297,7 @@ export async function signedFetch(url: string, options: RequestInit = {}): Promi
     body,
   });
 
-  // Build fetch headers - EXCLUDE 'host' because browser sets it automatically
-  // and it's a forbidden header that can't be overridden
+  // Exclude 'host' — browser sets it automatically and it's a forbidden header
   const fetchHeaders: Record<string, string> = {};
   for (const [key, value] of Object.entries(signed.headers)) {
     if (key.toLowerCase() !== 'host' && typeof value === 'string') {
@@ -337,9 +305,6 @@ export async function signedFetch(url: string, options: RequestInit = {}): Promi
     }
   }
 
-  console.log('Signed request headers:', Object.keys(fetchHeaders));
-
-  // Make the request using the original URL (browser will handle encoding)
   const response = await fetch(url, {
     method,
     headers: fetchHeaders,

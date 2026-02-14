@@ -134,7 +134,7 @@ export class GraphRAGStack extends Stack {
       })
     );
 
-    // Document Processor Function URL (AWS_IAM auth - requires signed requests)
+    // Document Processor Function URL
     const uploadFunctionUrl = documentProcessorLambda.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.AWS_IAM,
       cors: {
@@ -179,7 +179,7 @@ export class GraphRAGStack extends Stack {
       })
     );
 
-    // Query Handler Function URL (AWS_IAM auth - requires signed requests)
+    // Query Handler Function URL
     const queryFunctionUrl = queryHandlerLambda.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.AWS_IAM,
       cors: {
@@ -192,7 +192,6 @@ export class GraphRAGStack extends Stack {
 
     // ==================== IAM POLICIES FOR AUTHENTICATED USERS ====================
 
-    // Policy to invoke Lambda Function URLs (requires both permissions since Oct 2025)
     auth.resources.authenticatedUserIamRole.attachInlinePolicy(
       new iam.Policy(this, 'AuthUserLambdaInvokePolicy', {
         statements: [
@@ -207,7 +206,7 @@ export class GraphRAGStack extends Stack {
       })
     );
 
-    // Policy for S3 access (user-isolated paths)
+    // Policy for S3 access (user-scoped paths)
     auth.resources.authenticatedUserIamRole.attachInlinePolicy(
       new iam.Policy(this, 'AuthUserS3Policy', {
         statements: [
@@ -230,7 +229,7 @@ export class GraphRAGStack extends Stack {
       })
     );
 
-    // Policy for DynamoDB access (user-isolated)
+    // Policy for DynamoDB access (user-scoped)
     auth.resources.authenticatedUserIamRole.attachInlinePolicy(
       new iam.Policy(this, 'AuthUserDynamoDBPolicy', {
         statements: [
@@ -265,7 +264,7 @@ export class GraphRAGStack extends Stack {
 
     const uiPath = path.join(__dirname, '../../ui');
 
-    // Build UI at deploy time with bundling
+    // Build UI at deploy time
     const uiAsset = s3Deploy.Source.asset(uiPath, {
       bundling: {
         image: DockerImage.fromRegistry('public.ecr.aws/sam/build-nodejs20.x:latest'),
@@ -296,7 +295,7 @@ export class GraphRAGStack extends Stack {
       },
     });
 
-    // Create appconfig.json with runtime configuration
+    // Runtime configuration for the frontend
     const appConfig = {
       queryApiUrl: queryFunctionUrl.url,
       uploadApiUrl: uploadFunctionUrl.url,

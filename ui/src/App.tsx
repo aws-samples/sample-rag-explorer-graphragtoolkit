@@ -159,7 +159,7 @@ function App() {
       toolsHide
       content={
         <ContentLayout
-          header={<Header variant="h1">RAG Comparison Demo</Header>}
+          header={<Header variant="h1">RAG Explorer</Header>}
         >
           <Container
             header={

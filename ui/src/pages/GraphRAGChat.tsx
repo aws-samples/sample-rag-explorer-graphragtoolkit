@@ -532,7 +532,7 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
             header={
               <Header
                 variant="h1"
-                description="Compare GraphRAG vs Vector-only RAG responses side-by-side"
+                description="Compare GraphRAG vs Vector RAG side-by-side | Powered by graphrag-toolkit (awslabs)"
                 actions={
                   <SpaceBetween direction="horizontal" size="s">
                     <Button
@@ -548,7 +548,7 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
                   </SpaceBetween>
                 }
               >
-                RAG Comparison Demo
+                RAG Explorer
               </Header>
             }
           >

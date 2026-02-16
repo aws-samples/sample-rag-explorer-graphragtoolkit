@@ -2,6 +2,8 @@
 
 A demo comparing **GraphRAG** (Knowledge Graph-enhanced RAG) with traditional **Vector-only RAG** side-by-side. Built on AWS using Neptune Analytics, Lambda, Cognito, and CloudFront.
 
+> ⚠️ **Disclaimer**: This project is designed solely for demonstration of a Proof of Concept (PoC) and uses synthetic data to illustrate its capabilities. It does not incorporate production-grade security measures and should not be deployed as-is in a production environment.
+
 ## Why GraphRAG?
 
 Traditional vector RAG finds content that is **semantically similar** to your question. But it misses information that is **structurally relevant but semantically dissimilar**.
@@ -213,6 +215,19 @@ If you want to reduce this redundancy, you can add an entity-resolution or enric
 ```bash
 cd infra && cdk destroy
 ```
+
+## Housekeeping
+
+After completing the experiment, promptly remove or disable any keys and credentials generated for the PoC. Additionally, remove the associated AWS services to avoid incurring unnecessary costs.
+
+## Security Recommendation
+
+For any considerations of adopting this architecture in a production setting, it is imperative to consult with your company-specific security policies and requirements. Each production environment demands a uniquely tailored security architecture that comprehensively addresses its particular risks and regulatory standards. Some links for security best practices are shared below, but we strongly recommend reaching out to your AWS account team for detailed guidance and to discuss the appropriate security architecture needed for a secure and compliant deployment.
+
+- [AWS Well-Architected Framework — Security Pillar](https://docs.aws.amazon.com/wellarchitected/latest/security-pillar/welcome.html)
+- [AWS Security Best Practices](https://aws.amazon.com/architecture/security-identity-compliance/)
+- [Amazon Cognito Security Best Practices](https://docs.aws.amazon.com/cognito/latest/developerguide/security.html)
+- [Amazon Neptune Security](https://docs.aws.amazon.com/neptune/latest/userguide/security.html)
 
 ## License
 

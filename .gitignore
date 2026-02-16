@@ -55,3 +55,6 @@ infra/dist/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Internal security review
+security-review/

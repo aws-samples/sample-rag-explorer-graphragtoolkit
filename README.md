@@ -4,6 +4,8 @@ A demo comparing **GraphRAG** (Knowledge Graph-enhanced RAG) with traditional **
 
 > ⚠️ **Disclaimer**: This project is designed solely for demonstration of a Proof of Concept (PoC) and uses synthetic data to illustrate its capabilities. It does not incorporate production-grade security measures and should not be deployed as-is in a production environment.
 
+> **Note**: Sample code, software libraries, command line tools, proofs of concept, templates, or other related technology are provided as AWS Content or Third-Party Content under the AWS Customer Agreement, or the relevant written agreement between you and AWS (whichever applies). You should not use this AWS Content or Third-Party Content in your production accounts, or on production or other critical data. You are responsible for testing, securing, and optimizing the AWS Content or Third-Party Content, such as sample code, as appropriate for production grade use based on your specific quality control practices and standards. Deploying AWS Content or Third-Party Content may incur AWS charges for creating or using AWS chargeable resources, such as running Amazon EC2 instances or using Amazon S3 storage.
+
 ## Why GraphRAG?
 
 Traditional vector RAG finds content that is **semantically similar** to your question. But it misses information that is **structurally relevant but semantically dissimilar**.

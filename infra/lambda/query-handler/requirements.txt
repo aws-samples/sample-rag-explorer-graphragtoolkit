@@ -3,7 +3,7 @@ fastapi
 uvicorn
 
 # GraphRAG Toolkit
-graphrag-toolkit-lexical-graph @ https://github.com/awslabs/graphrag-toolkit/archive/refs/tags/v3.14.0.zip#subdirectory=lexical-graph
+graphrag-toolkit-lexical-graph @ https://github.com/awslabs/graphrag-toolkit/archive/refs/tags/v3.16.1.zip#subdirectory=lexical-graph
 
 # GraphRAG dependencies
 anthropic-bedrock

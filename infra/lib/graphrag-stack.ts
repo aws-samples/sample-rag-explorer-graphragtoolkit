@@ -85,6 +85,8 @@ export class GraphRAGStack extends Stack {
 
     // ==================== NEPTUNE ANALYTICS ====================
 
+    const s3VectorsBucketName = `graphrag-vectors-${this.account}-${this.region}`;
+
     const neptuneGraph = new neptune.CfnGraph(this, 'GraphRAGNeptuneGraph', {
       graphName: `graphrag-${this.stackName.toLowerCase()}`,
       provisionedMemory: 128,
@@ -108,7 +110,7 @@ export class GraphRAGStack extends Stack {
         S3_BUCKET: documentsBucket.bucketName,
         NEPTUNE_GRAPH_ID: neptuneGraph.attrGraphId,
         GRAPH_STORE: `neptune-graph://${neptuneGraph.attrGraphId}`,
-        VECTOR_STORE: `neptune-graph://${neptuneGraph.attrGraphId}`,
+        VECTOR_STORE: `s3vectors://${s3VectorsBucketName}`,
         EMBEDDING_MODEL: embedding.model,
         DOCUMENT_TABLE: documentRegistryTable.tableName,
       },
@@ -122,6 +124,7 @@ export class GraphRAGStack extends Stack {
         effect: iam.Effect.ALLOW,
         actions: [
           'neptune-graph:*',
+          's3vectors:*',
           'bedrock:InvokeModel',
           'bedrock:InvokeModelWithResponseStream',
           'bedrock:Converse',
@@ -157,7 +160,7 @@ export class GraphRAGStack extends Stack {
       environment: {
         NEPTUNE_GRAPH_ID: neptuneGraph.attrGraphId,
         GRAPH_STORE: `neptune-graph://${neptuneGraph.attrGraphId}`,
-        VECTOR_STORE: `neptune-graph://${neptuneGraph.attrGraphId}`,
+        VECTOR_STORE: `s3vectors://${s3VectorsBucketName}`,
         EMBEDDING_MODEL: embedding.model,
       },
     });
@@ -167,6 +170,7 @@ export class GraphRAGStack extends Stack {
         effect: iam.Effect.ALLOW,
         actions: [
           'neptune-graph:*',
+          's3vectors:*',
           'bedrock:InvokeModel',
           'bedrock:InvokeModelWithResponseStream',
           'bedrock:Converse',

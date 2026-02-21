@@ -38,6 +38,7 @@ interface Message {
   timestamp: Date
   sourcesCount?: number
   timeMs?: number
+  contextChars?: number
 }
 
 interface GraphStats {
@@ -367,6 +368,7 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
         timestamp: new Date(),
         sourcesCount: data.graphrag_sources?.length || 0,
         timeMs: data.graphrag_time_ms,
+        contextChars: data.graphrag_context_chars,
       }])
 
       setVectorMessages(prev => [...prev, {
@@ -375,6 +377,7 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
         timestamp: new Date(),
         sourcesCount: data.vector_sources?.length || 0,
         timeMs: data.vector_time_ms,
+        contextChars: data.vector_context_chars,
       }])
 
       // Capture per-query results
@@ -474,7 +477,7 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
       <div style={{ maxHeight: '350px', overflowY: 'auto', padding: '12px', backgroundColor: '#f9f9f9', borderRadius: '8px' }}>
         {messages.length === 0 ? (
           <Box textAlign="center" color="text-body-secondary" padding="m">
-            {isGraphRAG ? 'Uses knowledge graph with entity relationships' : 'Uses vector similarity search on document chunks'}
+            {isGraphRAG ? 'Uses graph-enhanced search with entity relationships' : 'Uses vector similarity search on document chunks'}
           </Box>
         ) : (
           <SpaceBetween size="s">
@@ -484,7 +487,7 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
                   {msg.role === 'user' ? '👤 You' : isGraphRAG ? '🔗 GraphRAG' : '📄 Vector RAG'}
                   {msg.role === 'assistant' && (
                     <span style={{ marginLeft: '8px', fontSize: '11px', color: '#666' }}>
-                      ({msg.sourcesCount || 0} sources, {msg.timeMs?.toFixed(0) || 0}ms)
+                      ({msg.sourcesCount || 0} {isGraphRAG ? 'results' : 'chunks'}, {msg.contextChars ? (msg.contextChars > 1000 ? (msg.contextChars / 1000).toFixed(1) + 'k' : msg.contextChars) : '?'} context chars, {msg.timeMs?.toFixed(0) || 0}ms)
                     </span>
                   )}
                 </Box>
@@ -646,7 +649,7 @@ export default function GraphRAGChat({ onSignOut }: GraphRAGChatProps) {
 
               {/* Comparison Chats */}
               <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-                {renderChat(graphMessages, '🔗 GraphRAG (Knowledge Graph)', true)}
+                {renderChat(graphMessages, '🔗 GraphRAG (Graph Enhanced Search)', true)}
                 {renderChat(vectorMessages, '📄 Vector RAG (Similarity Search)', false)}
               </Grid>
 

@@ -7,7 +7,8 @@
 | Frontend | S3 + CloudFront | React SPA hosting (Vite + Cloudscape) |
 | Query API | Lambda (Docker) | GraphRAG and Vector RAG queries, per-query results |
 | Upload API | Lambda (Docker) | Document upload, MD5 dedup, S3 storage, graph indexing |
-| Graph + Vector Store | Neptune Analytics | Knowledge graph and vector embeddings (single store) |
+| Graph Store | Neptune Analytics | Knowledge graph (lexical graph) |
+| Vector Store | Amazon S3 Vectors | Vector embeddings for similarity search |
 | Auth | Cognito | User Pool + Identity Pool, SigV4 credentials |
 | Document Storage | S3 | Raw documents under `private/{user_id}/{tenant_id}/documents/` |
 | Document Registry | DynamoDB | Document metadata + MD5 dedup index (GSI) |
@@ -63,7 +64,8 @@ cdk deploy
 ```
 
 This deploys:
-- Neptune Analytics graph (128 GB, public connectivity, vector search enabled)
+- Neptune Analytics graph (128 GB, public connectivity)
+- Amazon S3 Vectors bucket (auto-created by the toolkit on first indexing)
 - Document Processor Lambda (Docker, 3 GB RAM, 15 min timeout) with Function URL
 - Query Handler Lambda (Docker, 3 GB RAM, 5 min timeout) with Function URL
 - S3 buckets for documents and frontend

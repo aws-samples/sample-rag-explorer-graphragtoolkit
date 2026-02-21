@@ -44,6 +44,9 @@ class QueryResponse(BaseModel):
     graphrag_graph_links: List[dict]
     vector_time_ms: float
     graphrag_time_ms: float
+    vector_context_chars: int
+    graphrag_context_chars: int
+    graphrag_time_ms: float
 
 
 class VectorRetriever(BaseRetriever):
@@ -137,7 +140,8 @@ def vector_query(query: str, tenant_id: str, graph_store, vector_store) -> dict:
         "response": response,
         "sources": [{"text": n.text, "score": n.score, "source": source_to_name(n.metadata.get('source', 'Unknown'))} for n in results],
         "chunks": chunks,
-        "time_ms": (time.time() - start) * 1000
+        "time_ms": (time.time() - start) * 1000,
+        "context_chars": len(context)
     }
 
 
@@ -196,7 +200,8 @@ def graphrag_query(query: str, tenant_id: str, graph_store, vector_store) -> dic
         "sources": [{"text": n.text[:500] if n.text else '', "score": n.score} for n in response.source_nodes],
         "graph_nodes": graph_nodes,
         "graph_links": graph_links,
-        "time_ms": (time.time() - start) * 1000
+        "time_ms": (time.time() - start) * 1000,
+        "context_chars": sum(len(n.text or '') for n in response.source_nodes)
     }
 
 
@@ -232,7 +237,9 @@ async def query_documents(request: QueryRequest):
                 "graphrag_graph_nodes": graphrag_result["graph_nodes"],
                 "graphrag_graph_links": graphrag_result["graph_links"],
                 "vector_time_ms": vector_result["time_ms"],
-                "graphrag_time_ms": graphrag_result["time_ms"]
+                "graphrag_time_ms": graphrag_result["time_ms"],
+                "vector_context_chars": vector_result["context_chars"],
+                "graphrag_context_chars": graphrag_result["context_chars"],
             }
     except Exception as e:
         print(f"Query error: {e}")

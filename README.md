@@ -1,6 +1,6 @@
 # GraphRAG Neptune Analytics Demo
 
-A demo comparing **GraphRAG** (Knowledge Graph-enhanced RAG) with traditional **Vector-only RAG** side-by-side. Built on AWS using Neptune Analytics, Lambda, Cognito, and CloudFront.
+A demo comparing **GraphRAG** (Knowledge Graph-enhanced RAG) with traditional **Vector-only RAG** side-by-side. Built on AWS using Neptune Analytics, Amazon S3 Vectors, Lambda, Cognito, and CloudFront.
 
 > **Note**: This project is designed solely for demonstration of a Proof of Concept (PoC) and uses synthetic data to illustrate its capabilities. It does not incorporate production-grade security measures and should not be deployed as-is in a production environment.
 
@@ -8,16 +8,6 @@ A demo comparing **GraphRAG** (Knowledge Graph-enhanced RAG) with traditional **
 ## Why GraphRAG?
 
 Traditional vector RAG finds content that is **semantically similar** to your question. But it misses information that is **structurally relevant but semantically dissimilar**.
-
-Example scenario:
-- Example Corp sells Widgets with huge Christmas demand in the UK
-- Example Corp partners with AnyCompany Logistics for shipping
-- AnyCompany Logistics uses the Turquoise Canal to cut shipping times
-- The Turquoise Canal is blocked by landslides
-
-When asked *"What are the sales prospects for Example Corp in the UK?"*, vector search returns optimistic results about demand and partnerships — but **misses** the supply chain disruption because "blocked canal" isn't semantically similar to "sales prospects."
-
-GraphRAG solves this by building a **knowledge graph** of entities and relationships, then using **entity networks** (graph traversals) to find structurally connected information alongside vector similarity.
 
 ## Architecture
 
@@ -47,7 +37,7 @@ GraphRAG solves this by building a **knowledge graph** of entities and relations
    - `.md` files: `MarkdownNodeParser` → `SentenceSplitter` (512 chars, 50 overlap)
    - `.txt` files: `SentenceSplitter` (512 chars, 50 overlap)
    - LLM extracts propositions, topics, entities, and facts
-   - Builds a hierarchical lexical graph with vector embeddings in Neptune Analytics
+   - Builds a hierarchical lexical graph in Neptune Analytics with vector embeddings in Amazon S3 Vectors
 6. Document metadata is saved to DynamoDB
 
 ### Querying
@@ -69,7 +59,7 @@ Both approaches run in parallel for the same query:
 
 The query response includes the actual data used by each approach — vector chunks with scores, and graph nodes/links for visualization.
 
-## Try the Demo: The AnyCompany Supply Chain Scenario
+## Try the Demo: The Example Corp & AnyCompany Supply Chain Scenario
 
 The repository includes sample data in `sample-data/` that demonstrates exactly why GraphRAG outperforms pure vector search. The scenario involves a set of fictional press releases about **Example Corp**, a tech company selling AI-powered "Widget" desktop pets.
 
@@ -177,7 +167,8 @@ Deployment takes ~15-20 minutes (Neptune Analytics creation is the bottleneck).
 
 | Component | Service |
 |-----------|---------|
-| Graph + Vector Store | Amazon Neptune Analytics |
+| Graph Store | Amazon Neptune Analytics |
+| Vector Store | Amazon S3 Vectors |
 | LLM | Amazon Bedrock (Claude 3 Sonnet) |
 | Embeddings | Amazon Bedrock (Titan Text Embeddings V2, 1024d) |
 | Compute | AWS Lambda (Docker containers) |
@@ -200,11 +191,11 @@ If you want to reduce this redundancy, you can add an entity-resolution or enric
 
 ## Cost Considerations
 
-> **Note — Storage Options**: The [graphrag-toolkit](https://github.com/awslabs/graphrag-toolkit) supports multiple options for graph and vector stores:
+> **Note — Storage Options**: The [graphrag-toolkit](https://github.com/awslabs/graphrag-toolkit) supports multiple backends:
 > - **Graph stores**: Amazon Neptune Analytics, Amazon Neptune Database, and Neo4j
-> - **Vector stores**: Neptune Analytics, Amazon OpenSearch Serverless, and PostgreSQL with pgvector
+> - **Vector stores**: Amazon S3 Vectors, Neptune Analytics, Amazon OpenSearch Serverless, and PostgreSQL with pgvector
 >
-> This demo uses **Neptune Analytics for both graph and vector** for simplicity — a single managed service handles everything. For advanced configuration (custom reranking, retrieval strategies), see the [lexical-graph documentation](https://github.com/awslabs/graphrag-toolkit/tree/main/docs/lexical-graph).
+> This demo uses **Neptune Analytics for the graph store** and **Amazon S3 Vectors for the vector store**. For advanced configuration (custom reranking, retrieval strategies), see the [lexical-graph documentation](https://github.com/awslabs/graphrag-toolkit/tree/main/docs/lexical-graph).
 
 - **Neptune Analytics**: ~$0.10/GB-hour (128 GB minimum ≈ $12.80/hour)
 - **Lambda**: Pay per invocation and duration
@@ -231,6 +222,13 @@ For any considerations of adopting this architecture in a production setting, it
 - [Amazon Neptune Security](https://docs.aws.amazon.com/neptune/latest/userguide/security.html)
 
 > ⚠️ **Disclaimer**: Sample code, software libraries, command line tools, proofs of concept, templates, or other related technology are provided as AWS Content or Third-Party Content under the AWS Customer Agreement, or the relevant written agreement between you and AWS (whichever applies). You should not use this AWS Content or Third-Party Content in your production accounts, or on production or other critical data. You are responsible for testing, securing, and optimizing the AWS Content or Third-Party Content, such as sample code, as appropriate for production grade use based on your specific quality control practices and standards. Deploying AWS Content or Third-Party Content may incur AWS charges for creating or using AWS chargeable resources, such as running Amazon EC2 instances or using Amazon S3 storage.
+
+## Authors
+
+- Aditya Chaphekar — Solutions Architect, AWS Startups
+- Camillo Anania — Principal Solutions Architect, AWS Startups
+- Kemeng Zhang — Solutions Architect, AWS Startups
+- Kevin Shaffer-Morrison — Senior Solutions Architect, AWS Startups
 
 ## License
 

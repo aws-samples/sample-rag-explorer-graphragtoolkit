@@ -1,6 +1,6 @@
-# GraphRAG Neptune Analytics Demo
+# RAG Explorer
 
-A demo comparing **GraphRAG** (Knowledge Graph-enhanced RAG) with traditional **Vector-only RAG** side-by-side. Built on AWS using Neptune Analytics, Amazon S3 Vectors, Lambda, Cognito, and CloudFront.
+Compare GraphRAG vs Vector RAG side-by-side | Powered by [graphrag-toolkit](https://github.com/awslabs/graphrag-toolkit) (awslabs)
 
 > **Note**: This project is designed solely for demonstration of a Proof of Concept (PoC) and uses synthetic data to illustrate its capabilities. It does not incorporate production-grade security measures and should not be deployed as-is in a production environment.
 

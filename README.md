@@ -197,12 +197,12 @@ If you want to reduce this redundancy, you can add an entity-resolution or enric
 >
 > This demo uses **Neptune Analytics for the graph store** and **Amazon S3 Vectors for the vector store**. For advanced configuration (custom reranking, retrieval strategies), see the [lexical-graph documentation](https://github.com/awslabs/graphrag-toolkit/tree/main/docs/lexical-graph).
 
-- **Neptune Analytics**: ~$0.10/GB-hour (128 GB minimum ≈ $12.80/hour)
+- **Neptune Analytics**: ~$3.84/hour(128 m-NCUs) 
 - **Lambda**: Pay per invocation and duration
 - **Bedrock**: Pay per token (extraction + generation)
 - **S3/DynamoDB/CloudFront**: Minimal for demo usage
 
-**Destroy the stack when not in use** to avoid Neptune Analytics charges:
+**Destroy the stack when not in use**
 
 ```bash
 cd infra && cdk destroy

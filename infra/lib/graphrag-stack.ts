@@ -25,15 +25,23 @@ interface EmbeddingProps {
   size: number;
 }
 
+interface ModelProps {
+  /** Bedrock model ID (or inference-profile ID) used by graphrag-toolkit for entity/relation extraction. */
+  extractionModel: string;
+  /** Bedrock model ID (or inference-profile ID) used for answer generation. */
+  responseModel: string;
+}
+
 export interface GraphRAGStackProps extends StackProps {
   embedding: EmbeddingProps;
+  models: ModelProps;
 }
 
 export class GraphRAGStack extends Stack {
   constructor(scope: Construct, id: string, props: GraphRAGStackProps) {
     super(scope, id, props);
 
-    const { embedding } = props;
+    const { embedding, models } = props;
 
     // ==================== COGNITO AUTH ====================
 
@@ -112,6 +120,11 @@ export class GraphRAGStack extends Stack {
         GRAPH_STORE: `neptune-graph://${neptuneGraph.attrGraphId}`,
         VECTOR_STORE: `s3vectors://${s3VectorsBucketName}`,
         EMBEDDING_MODEL: embedding.model,
+        // graphrag-toolkit reads these envs via GraphRAGConfig
+        EMBEDDINGS_MODEL: embedding.model,
+        EMBEDDINGS_DIMENSIONS: String(embedding.size),
+        EXTRACTION_MODEL: models.extractionModel,
+        RESPONSE_MODEL: models.responseModel,
         DOCUMENT_TABLE: documentRegistryTable.tableName,
       },
     });
@@ -162,6 +175,11 @@ export class GraphRAGStack extends Stack {
         GRAPH_STORE: `neptune-graph://${neptuneGraph.attrGraphId}`,
         VECTOR_STORE: `s3vectors://${s3VectorsBucketName}`,
         EMBEDDING_MODEL: embedding.model,
+        // graphrag-toolkit reads these envs via GraphRAGConfig
+        EMBEDDINGS_MODEL: embedding.model,
+        EMBEDDINGS_DIMENSIONS: String(embedding.size),
+        EXTRACTION_MODEL: models.extractionModel,
+        RESPONSE_MODEL: models.responseModel,
       },
     });
 

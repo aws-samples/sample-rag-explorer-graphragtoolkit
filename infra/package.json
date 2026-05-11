@@ -12,14 +12,15 @@
     "destroy": "cdk destroy --all"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
-    "typescript": "~5.4.0",
-    "aws-cdk": "^2.170.0"
+    "@types/node": "^20.19.40",
+    "aws-cdk": "^2.170.0",
+    "typescript": "~5.4.0"
   },
   "dependencies": {
     "@aws-amplify/auth-construct": "^1.0.0",
     "aws-cdk-lib": "^2.170.0",
     "constructs": "^10.0.0",
+    "dotenv": "^17.4.2",
     "source-map-support": "^0.5.21"
   }
 }

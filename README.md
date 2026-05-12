@@ -45,8 +45,8 @@ Traditional vector RAG finds content that is **semantically similar** to your qu
 Both approaches run in parallel for the same query:
 
 **Vector RAG:**
-1. Embed the question using Titan Embeddings V2
-2. Top-k similarity search on chunk embeddings in Neptune Analytics
+1. Embed the question using the configured embedding model (default: Cohere Embed English v3)
+2. Top-k similarity search on chunk embeddings in Amazon S3 Vectors
 3. Retrieve chunk text
 4. LLM generates response from retrieved chunks
 
@@ -117,7 +117,7 @@ GraphRAG builds a knowledge graph connecting: Example Corp → AnyCompany Logist
 - Node.js 18+ and npm
 - Docker (for Lambda container images)
 - CDK CLI: `npm install -g aws-cdk`
-- Amazon Bedrock model access enabled (Claude 3 Sonnet + Titan Text Embeddings V2)
+- Amazon Bedrock model access enabled for the extraction, response, and embedding models you plan to use. Defaults: **Claude Sonnet 4.6** (`us.anthropic.claude-sonnet-4-6`) and **Cohere Embed English v3** (`cohere.embed-english-v3`). You can override these via `.env` (see [Configuration](#configuration)).
 
 ### Deploy
 
@@ -141,6 +141,20 @@ Deployment takes ~15-20 minutes (Neptune Analytics creation is the bottleneck).
 4. Upload `.txt` or `.md` documents
 5. Ask questions — responses from both GraphRAG and Vector RAG appear side-by-side
 6. Expand "Query Results" to see the graph visualization, vector chunks, and GraphRAG sources used
+
+## Configuration
+
+Model selection is env-driven so you can swap Bedrock models without code changes. Copy `.env.example` to `.env` at the repo root and adjust as needed — `infra/bin/infra.ts` loads this file at deploy time.
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `EXTRACTION_MODEL` | LLM used by graphrag-toolkit for entity/relationship extraction during indexing | `us.anthropic.claude-sonnet-4-6` |
+| `RESPONSE_MODEL` | LLM used for final answer generation during query | `us.anthropic.claude-sonnet-4-6` |
+| `EMBEDDINGS_MODEL` | Embedding model used for chunk and topic vectors | `cohere.embed-english-v3` |
+| `EMBEDDINGS_DIMENSIONS` | Embedding dimensionality — must match the Neptune vector index dimension | `1024` |
+| `CDK_DEPLOY_REGION` | Override the default deploy region (us-west-2) | `us-west-2` |
+
+Use Bedrock model IDs or US cross-region inference profile IDs (prefix `us.`). Whenever you change `EXTRACTION_MODEL` or `EMBEDDINGS_MODEL`, you should reset the graph (via the UI's reset action or the `/reset-graph` endpoint) and re-upload documents, because existing graph data and vector embeddings were produced by the previous model and are not mix-and-match compatible.
 
 ## Project Structure
 
@@ -169,8 +183,8 @@ Deployment takes ~15-20 minutes (Neptune Analytics creation is the bottleneck).
 |-----------|---------|
 | Graph Store | Amazon Neptune Analytics |
 | Vector Store | Amazon S3 Vectors |
-| LLM | Amazon Bedrock (Claude 3 Sonnet) |
-| Embeddings | Amazon Bedrock (Titan Text Embeddings V2, 1024d) |
+| LLM | Amazon Bedrock — extraction + response LLMs configurable via env (default: Claude Sonnet 4.6) |
+| Embeddings | Amazon Bedrock — configurable via env (default: Cohere Embed English v3, 1024d) |
 | Compute | AWS Lambda (Docker containers) |
 | Auth | Amazon Cognito (User Pool + Identity Pool) |
 | Frontend | React + Vite + Cloudscape Design System + D3.js |

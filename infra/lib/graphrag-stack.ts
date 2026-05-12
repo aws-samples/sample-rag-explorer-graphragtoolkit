@@ -13,6 +13,7 @@ import {
   aws_cloudfront_origins as origins,
   aws_neptunegraph as neptune,
   aws_dynamodb as dynamodb,
+  custom_resources as cr,
 } from 'aws-cdk-lib';
 import { AmplifyAuth } from '@aws-amplify/auth-construct';
 import * as path from 'path';
@@ -95,6 +96,37 @@ export class GraphRAGStack extends Stack {
 
     const s3VectorsBucketName = `graphrag-vectors-${this.account}-${this.region}`;
 
+    // S3 Vectors is a new service without native CloudFormation / CDK L1 support yet.
+    // graphrag-toolkit v3.18+ no longer auto-creates the bucket on first write (see
+    // check_vector_bucket in s3_vector_indexes.py), so we create it here via AwsCustomResource.
+    const s3VectorsBucket = new cr.AwsCustomResource(this, 'S3VectorsBucket', {
+      onCreate: {
+        service: 's3vectors',
+        action: 'createVectorBucket',
+        parameters: { vectorBucketName: s3VectorsBucketName },
+        physicalResourceId: cr.PhysicalResourceId.of(s3VectorsBucketName),
+        ignoreErrorCodesMatching: 'ConflictException',
+      },
+      onDelete: {
+        service: 's3vectors',
+        action: 'deleteVectorBucket',
+        parameters: { vectorBucketName: s3VectorsBucketName },
+        ignoreErrorCodesMatching: 'NotFoundException',
+      },
+      policy: cr.AwsCustomResourcePolicy.fromStatements([
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: [
+            's3vectors:CreateVectorBucket',
+            's3vectors:DeleteVectorBucket',
+            's3vectors:GetVectorBucket',
+          ],
+          resources: ['*'],
+        }),
+      ]),
+      installLatestAwsSdk: true,
+    });
+
     const neptuneGraph = new neptune.CfnGraph(this, 'GraphRAGNeptuneGraph', {
       graphName: `graphrag-${this.stackName.toLowerCase()}`,
       provisionedMemory: 128,
@@ -131,6 +163,7 @@ export class GraphRAGStack extends Stack {
 
     documentsBucket.grantReadWrite(documentProcessorLambda);
     documentRegistryTable.grantReadWriteData(documentProcessorLambda);
+    documentProcessorLambda.node.addDependency(s3VectorsBucket);
 
     documentProcessorLambda.addToRolePolicy(
       new iam.PolicyStatement({
@@ -182,6 +215,8 @@ export class GraphRAGStack extends Stack {
         RESPONSE_MODEL: models.responseModel,
       },
     });
+
+    queryHandlerLambda.node.addDependency(s3VectorsBucket);
 
     queryHandlerLambda.addToRolePolicy(
       new iam.PolicyStatement({

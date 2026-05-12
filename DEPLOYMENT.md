@@ -36,9 +36,13 @@ Required IAM permissions: CloudFormation, Lambda, S3, DynamoDB, CloudFront, Cogn
 
 ### Enable Bedrock Models
 
-In the AWS Console → **Amazon Bedrock** → **Model access**, enable:
-- **Claude 3 Sonnet** (or Claude 3.5 Sonnet) — extraction and response generation
-- **Titan Text Embeddings V2** — vector embeddings (1024 dimensions)
+In the AWS Console → **Amazon Bedrock** → **Model access**, enable the models you plan to use.
+
+Defaults (see [Configuration](README.md#configuration) to override):
+- **Claude Sonnet 4.6** (`us.anthropic.claude-sonnet-4-6`) — extraction and response generation
+- **Cohere Embed English v3** (`cohere.embed-english-v3`) — vector embeddings (1024 dimensions)
+
+If you set different models via `.env`, grant access to those instead. Whichever embedding model you pick, the `EMBEDDINGS_DIMENSIONS` value must match the model's output dimensions.
 
 ## Deployment
 
@@ -187,7 +191,7 @@ Neptune Analytics is configured with `publicConnectivity: true`. Lambda executio
 
 ### Bedrock Access Denied
 
-Go to AWS Console → Bedrock → Model access → enable Claude 3 Sonnet and Titan Text Embeddings V2. Wait a few minutes for propagation.
+Go to AWS Console → Bedrock → Model access → enable the models listed in your `.env` (or the defaults: Claude Sonnet 4.6 and Cohere Embed English v3). Wait a few minutes for propagation.
 
 ### "Already Processed" on Upload
 

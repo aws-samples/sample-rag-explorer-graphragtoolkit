@@ -12,9 +12,9 @@ const app = new cdk.App();
 
 // Defaults point at current GA Bedrock cross-region inference profiles. Override via env
 // vars (EXTRACTION_MODEL, RESPONSE_MODEL, EMBEDDINGS_MODEL, EMBEDDINGS_DIMENSIONS) if needed.
-const extractionModel = process.env.EXTRACTION_MODEL || 'us.anthropic.claude-sonnet-4-5-20250929-v1:0';
-const responseModel = process.env.RESPONSE_MODEL || 'us.anthropic.claude-sonnet-4-5-20250929-v1:0';
-const embeddingModel = process.env.EMBEDDINGS_MODEL || 'amazon.titan-embed-text-v2:0';
+const extractionModel = process.env.EXTRACTION_MODEL || 'us.anthropic.claude-sonnet-4-6';
+const responseModel = process.env.RESPONSE_MODEL || 'us.anthropic.claude-sonnet-4-6';
+const embeddingModel = process.env.EMBEDDINGS_MODEL || 'cohere.embed-english-v3';
 const embeddingSize = Number(process.env.EMBEDDINGS_DIMENSIONS || '1024');
 
 new GraphRAGStack(app, 'GraphRAGStack', {
